@@ -71,6 +71,12 @@ react-hono-practice/
 │   ├── package.json
 │   └── .env.example
 ├── frontend/                     # React アプリ
+├── test/                         # `npm create hono@latest` で各デプロイ先テンプレートを試したフォルダ
+│   ├── aws-lambda/              # AWS Lambda テンプレート
+│   ├── cloudflare-workers/      # Cloudflare Workers テンプレート
+│   ├── cloudflare-workers-vite/ # Cloudflare Workers (Vite) テンプレート
+│   ├── lambda-edge/             # Lambda@Edge テンプレート
+│   └── node/                    # Node.js テンプレート
 ├── docker/                       # Docker 設定
 ├── docker-compose.yml
 └── docs/                         # ドキュメント
