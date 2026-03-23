@@ -1,6 +1,6 @@
 import QRCode from 'qrcode';
 import crypto from 'node:crypto';
-import { uploadFile } from './storage.service.js';
+import { uploadFile } from './storage.service';
 
 export async function generateAndUpload(
   data: string,

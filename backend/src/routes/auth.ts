@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
-import { redirectToGoogle, handleGoogleCallback, getUser, logout } from '../controllers/auth.controller.js';
-import { authMiddleware } from '../middleware/auth.js';
-import type { Env } from '../types/index.js';
+import { redirectToGoogle, handleGoogleCallback, getUser, logout } from '../controllers/auth.controller';
+import { authMiddleware } from '../middleware/auth';
+import type { Env } from '../types/index';
 
 const auth = new Hono<Env>();
 

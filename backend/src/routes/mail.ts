@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
-import { send } from '../controllers/mail.controller.js';
-import { authMiddleware } from '../middleware/auth.js';
-import type { Env } from '../types/index.js';
+import { send } from '../controllers/mail.controller';
+import { authMiddleware } from '../middleware/auth';
+import type { Env } from '../types/index';
 
 const mail = new Hono<Env>();
 

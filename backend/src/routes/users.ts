@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
-import { index } from '../controllers/users.controller.js';
-import { authMiddleware } from '../middleware/auth.js';
-import type { Env } from '../types/index.js';
+import { index } from '../controllers/users.controller';
+import { authMiddleware } from '../middleware/auth';
+import type { Env } from '../types/index';
 
 const usersRoute = new Hono<Env>();
 

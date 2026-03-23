@@ -1,8 +1,8 @@
 import { createMiddleware } from 'hono/factory';
 import { eq } from 'drizzle-orm';
-import { db } from '../config/database.js';
-import { users } from '../db/schema.js';
-import type { Env } from '../types/index.js';
+import { db } from '../config/database';
+import { users } from '../db/schema';
+import type { Env } from '../types/index';
 
 export const authMiddleware = createMiddleware<Env>(async (c, next) => {
   const session = c.get('session');

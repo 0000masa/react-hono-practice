@@ -1,5 +1,5 @@
-import { transporter } from '../config/mail.js';
-import { env } from '../config/env.js';
+import { transporter } from '../config/mail';
+import { env } from '../config/env';
 
 export async function sendMail(
   to: string,

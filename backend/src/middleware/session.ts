@@ -1,10 +1,10 @@
 import { createMiddleware } from 'hono/factory';
 import crypto from 'node:crypto';
 import { eq } from 'drizzle-orm';
-import { db } from '../config/database.js';
-import { sessions } from '../db/schema.js';
-import { env } from '../config/env.js';
-import type { Env, SessionData } from '../types/index.js';
+import { db } from '../config/database';
+import { sessions } from '../db/schema';
+import { env } from '../config/env';
+import type { Env, SessionData } from '../types/index';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 
 const COOKIE_NAME = 'hono_session';

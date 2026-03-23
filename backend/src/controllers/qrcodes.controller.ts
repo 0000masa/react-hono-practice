@@ -1,10 +1,10 @@
 import type { Context } from 'hono';
 import { desc, count, eq } from 'drizzle-orm';
-import { db } from '../config/database.js';
-import { qrCodes, users } from '../db/schema.js';
-import { generateAndUpload } from '../services/qrcode.service.js';
-import { getFileUrl } from '../services/storage.service.js';
-import type { Env, PaginationMeta } from '../types/index.js';
+import { db } from '../config/database';
+import { qrCodes, users } from '../db/schema';
+import { generateAndUpload } from '../services/qrcode.service';
+import { getFileUrl } from '../services/storage.service';
+import type { Env, PaginationMeta } from '../types/index';
 
 const PER_PAGE = 50;
 

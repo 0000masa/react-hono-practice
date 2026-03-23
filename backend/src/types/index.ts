@@ -1,5 +1,5 @@
 import type { InferSelectModel } from 'drizzle-orm';
-import type { users, qrCodes, sessions } from '../db/schema.js';
+import type { users, qrCodes, sessions } from '../db/schema';
 
 export type User = InferSelectModel<typeof users>;
 export type QrCode = InferSelectModel<typeof qrCodes>;

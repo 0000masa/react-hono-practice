@@ -1,13 +1,13 @@
 import type { Context } from 'hono';
 import { generateState, generateCodeVerifier } from 'arctic';
 import { eq, or } from 'drizzle-orm';
-import { google } from '../config/auth.js';
-import { db } from '../config/database.js';
-import { users } from '../db/schema.js';
-import { env } from '../config/env.js';
-import { setSession, destroySession } from '../middleware/session.js';
+import { google } from '../config/auth';
+import { db } from '../config/database';
+import { users } from '../db/schema';
+import { env } from '../config/env';
+import { setSession, destroySession } from '../middleware/session';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
-import type { Env } from '../types/index.js';
+import type { Env } from '../types/index';
 
 export async function redirectToGoogle(c: Context<Env>) {
   const state = generateState();

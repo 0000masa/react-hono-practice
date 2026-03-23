@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
-import { index, store, storeAsync, status } from '../controllers/qrcodes.controller.js';
-import { authMiddleware } from '../middleware/auth.js';
-import type { Env } from '../types/index.js';
+import { index, store, storeAsync, status } from '../controllers/qrcodes.controller';
+import { authMiddleware } from '../middleware/auth';
+import type { Env } from '../types/index';
 
 const qrcodes = new Hono<Env>();
 

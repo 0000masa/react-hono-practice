@@ -1,10 +1,10 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import { env } from './config/env.js';
-import { sessionMiddleware } from './middleware/session.js';
-import api from './routes/index.js';
-import type { Env } from './types/index.js';
+import { env } from './config/env';
+import { sessionMiddleware } from './middleware/session';
+import api from './routes/index';
+import type { Env } from './types/index';
 
 const app = new Hono<Env>();
 

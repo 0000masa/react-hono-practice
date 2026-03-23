@@ -1,6 +1,6 @@
 import { PutObjectCommand } from '@aws-sdk/client-s3';
-import { s3Client } from '../config/storage.js';
-import { env } from '../config/env.js';
+import { s3Client } from '../config/storage';
+import { env } from '../config/env';
 
 export async function uploadFile(
   key: string,

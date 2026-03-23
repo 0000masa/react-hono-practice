@@ -1,8 +1,8 @@
 import type { Context } from 'hono';
 import { desc, count } from 'drizzle-orm';
-import { db } from '../config/database.js';
-import { users } from '../db/schema.js';
-import type { Env, PaginationMeta } from '../types/index.js';
+import { db } from '../config/database';
+import { users } from '../db/schema';
+import type { Env, PaginationMeta } from '../types/index';
 
 const PER_PAGE = 50;
 

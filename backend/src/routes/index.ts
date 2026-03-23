@@ -1,10 +1,10 @@
 import { Hono } from 'hono';
-import auth from './auth.js';
-import usersRoute from './users.js';
-import qrcodes from './qrcodes.js';
-import mail from './mail.js';
-import health from './health.js';
-import type { Env } from '../types/index.js';
+import auth from './auth';
+import usersRoute from './users';
+import qrcodes from './qrcodes';
+import mail from './mail';
+import health from './health';
+import type { Env } from '../types/index';
 
 const api = new Hono<Env>();
 

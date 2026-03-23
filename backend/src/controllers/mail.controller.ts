@@ -1,6 +1,6 @@
 import type { Context } from 'hono';
-import { sendMail } from '../services/mail.service.js';
-import type { Env } from '../types/index.js';
+import { sendMail } from '../services/mail.service';
+import type { Env } from '../types/index';
 
 export async function send(c: Context<Env>) {
   const body = await c.req.json<{ to?: string; subject?: string; message?: string }>();

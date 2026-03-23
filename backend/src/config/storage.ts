@@ -1,5 +1,5 @@
 import { S3Client, CreateBucketCommand, HeadBucketCommand, PutBucketPolicyCommand } from '@aws-sdk/client-s3';
-import { env } from './env.js';
+import { env } from './env';
 
 export const s3Client = new S3Client({
   endpoint: env.S3_ENDPOINT,

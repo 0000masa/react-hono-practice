@@ -1,7 +1,7 @@
 import { serve } from '@hono/node-server';
-import app from './app.js';
-import { env } from './config/env.js';
-import { ensureBucket } from './config/storage.js';
+import app from './app';
+import { env } from './config/env';
+import { ensureBucket } from './config/storage';
 
 async function main() {
   try {
