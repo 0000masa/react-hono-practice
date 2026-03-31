@@ -1,4 +1,5 @@
 data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
 
 data "aws_ssm_parameter" "db_password" {
   name            = "${var.parameter_store_path}db_password"

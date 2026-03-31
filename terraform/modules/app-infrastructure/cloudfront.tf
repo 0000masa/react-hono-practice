@@ -96,12 +96,21 @@ resource "aws_cloudfront_distribution" "frontend_cdn" {
     origin_access_control_id = aws_cloudfront_origin_access_control.s3_oac_frontend.id
   }
 
-  # バックエンド用オリジン（API Gateway デフォルトドメイン）
-  # api_endpoint は "https://xxx.execute-api.region.amazonaws.com" 形式だが、
-  # origin の domain_name にはプロトコル無しのホスト名が必要なため replace で除去
+  # バックエンド用オリジン（API Gateway REST API）
+  # CloudFront が x-api-key を付与し、API Gateway 側で検証することで直接アクセスを拒否
   origin {
-    domain_name = replace(aws_apigatewayv2_api.main.api_endpoint, "https://", "")
+    domain_name = "${aws_api_gateway_rest_api.main.id}.execute-api.${data.aws_region.current.name}.amazonaws.com"
     origin_id   = "backend-api"
+
+    # REST API はステージ名がURLパスに必須。origin_path でリクエストパスの先頭にステージ名を付与する。
+    # 例: ユーザーが /api/users にアクセス → CloudFront が /v1/api/users に変換して API Gateway に送信
+    #     → API Gateway は /v1 をステージ名として消費し、/api/users を Lambda に渡す
+    origin_path = "/${aws_api_gateway_stage.main.stage_name}"
+
+    custom_header {
+      name  = "x-api-key"
+      value = random_password.api_key_value.result
+    }
 
     custom_origin_config {
       http_port              = 80
