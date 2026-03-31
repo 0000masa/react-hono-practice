@@ -3,21 +3,19 @@
 # -----------------------------------------------------------------
 
 # サブネットIDの保存
-# Run Taskを実行するサブネット（Private Subnetを推奨）のIDを保存します。
 resource "aws_ssm_parameter" "backend_subnet_id" {
   name        = "${var.parameter_store_path}subnet_id"
-  description = "Subnet ID for ECS Run Task (Migration/Seeder)"
+  description = "Subnet ID for Lambda VPC configuration"
   type        = "String"
   value       = local.private_subnet_a_id
 }
 
 # セキュリティグループIDの保存
-# ECSタスク（バックエンド）に割り当てるセキュリティグループIDを保存します。
 resource "aws_ssm_parameter" "backend_security_group_id" {
   name        = "${var.parameter_store_path}security_group_id"
-  description = "Security Group ID for ECS Run Task (Migration/Seeder)"
+  description = "Security Group ID for Lambda"
   type        = "String"
-  value       = aws_security_group.ecs_sg.id
+  value       = aws_security_group.lambda_sg.id
 }
 
 # フロントエンドバケット名の保存
@@ -40,30 +38,27 @@ resource "aws_ssm_parameter" "backend_url" {
   value = "https://${var.sub_backend_domain_name}.${var.domain_name}"
 }
 
-resource "aws_ssm_parameter" "otel_collector_config" {
-  name = "${var.parameter_store_path}otel-collector-config"
-  type = "String"
+# Lambda 関数名の保存（CI/CD でのデプロイ用）
+resource "aws_ssm_parameter" "lambda_api_function_name" {
+  name  = "${var.parameter_store_path}lambda_api_function_name"
+  type  = "String"
+  value = aws_lambda_function.api.function_name
+}
 
-  value = <<-YAML
-receivers:
-  otlp:
-    protocols:
-      grpc:
-        endpoint: 0.0.0.0:4317
-      http:
-        endpoint: 0.0.0.0:4318
+resource "aws_ssm_parameter" "lambda_sqs_worker_function_name" {
+  name  = "${var.parameter_store_path}lambda_sqs_worker_function_name"
+  type  = "String"
+  value = aws_lambda_function.sqs_worker.function_name
+}
 
-processors:
-  batch: {}
+resource "aws_ssm_parameter" "lambda_migration_function_name" {
+  name  = "${var.parameter_store_path}lambda_migration_function_name"
+  type  = "String"
+  value = aws_lambda_function.migration.function_name
+}
 
-exporters:
-  awsxray: {}
-
-service:
-  pipelines:
-    traces:
-      receivers: [otlp]
-      processors: [batch]
-      exporters: [awsxray]
-YAML
+resource "aws_ssm_parameter" "lambda_daily_report_function_name" {
+  name  = "${var.parameter_store_path}lambda_daily_report_function_name"
+  type  = "String"
+  value = aws_lambda_function.daily_report.function_name
 }

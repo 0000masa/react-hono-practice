@@ -1,76 +1,38 @@
-module "ecs_task_execution_role" {
+# ==============================================================================
+# Lambda 実行ロール
+# ==============================================================================
+
+module "lambda_execution_role" {
   source = "terraform-aws-modules/iam/aws//modules/iam-role"
 
-  name            = "${var.project_name}-execution-role"
+  name            = "${var.project_name}-lambda-execution-role"
   use_name_prefix = false
 
   trust_policy_permissions = {
-    #ecs_tasksはだめ
-    ecsTasks = {
+    lambda = {
       actions = ["sts:AssumeRole"]
       principals = [{
         type        = "Service"
-        identifiers = ["ecs-tasks.amazonaws.com"]
+        identifiers = ["lambda.amazonaws.com"]
       }]
     }
   }
 
   policies = {
-    AmazonECSTaskExecutionRolePolicy = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-    EcsExecutionSsmPolicy            = aws_iam_policy.ecs_execution_ssm_policy.arn
+    AWSLambdaBasicExecutionRole      = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+    AWSLambdaVPCAccessExecutionRole  = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+    LambdaS3Policy                   = aws_iam_policy.lambda_s3_policy.arn
+    LambdaSesSendPolicy              = aws_iam_policy.ses_send_policy.arn
+    LambdaSqsPolicy                  = aws_iam_policy.sqs_queue_policy.arn
+    LambdaSsmPolicy                  = aws_iam_policy.lambda_ssm_policy.arn
+    LambdaRdsProxyPolicy             = aws_iam_policy.lambda_rds_proxy_policy.arn
   }
 }
 
-module "ecs_task_role" {
-  source = "terraform-aws-modules/iam/aws//modules/iam-role"
+# ==============================================================================
+# EventBridge 用 IAM ロール
+# ==============================================================================
 
-  name            = "${var.project_name}-task-role"
-  use_name_prefix = false
-
-  trust_policy_permissions = {
-    #ecs_tasksはだめ
-    ecsTasks = {
-      actions = ["sts:AssumeRole"]
-      principals = [{
-        type        = "Service"
-        identifiers = ["ecs-tasks.amazonaws.com"]
-      }]
-    }
-  }
-
-  policies = {
-    EcsS3Policy            = aws_iam_policy.ecs_s3_policy.arn
-    SesSendPolicy          = aws_iam_policy.ses_send_policy.arn
-    EcsExecPolicy          = aws_iam_policy.ecs_exec_policy.arn
-    FirelensCloudWatchLogs = aws_iam_policy.firelens_cloudwatch_logs.arn
-    XRayDaemonWriteAccess  = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
-    SqsQueuePolicy         = aws_iam_policy.sqs_queue_policy.arn
-  }
-}
-
-module "ecs_infra_lb" {
-  source = "terraform-aws-modules/iam/aws//modules/iam-role"
-
-  name            = "${var.project_name}-ecs-infra-lb-role"
-  use_name_prefix = false
-
-  trust_policy_permissions = {
-    ecs = {
-      actions = ["sts:AssumeRole"]
-      principals = [{
-        type        = "Service"
-        identifiers = ["ecs.amazonaws.com"]
-      }]
-    }
-  }
-
-  policies = {
-    AmazonECSInfrastructureRolePolicyForLoadBalancers = "arn:aws:iam::aws:policy/AmazonECSInfrastructureRolePolicyForLoadBalancers"
-  }
-}
-
-
-# --- EventBridge 用 IAM ロール ---
 module "eventbridge_role" {
   source = "terraform-aws-modules/iam/aws//modules/iam-role"
 
@@ -88,9 +50,13 @@ module "eventbridge_role" {
   }
 
   policies = {
-    EventBridgeEcsRunTask = aws_iam_policy.eventbridge_ecs_run_task.arn
+    EventBridgeLambdaInvoke = aws_iam_policy.eventbridge_lambda_invoke.arn
   }
 }
+
+# ==============================================================================
+# 通知 Lambda 用 IAM ロール（既存の通知Lambda用、変更なし）
+# ==============================================================================
 
 module "notification_lambda_role" {
   source = "terraform-aws-modules/iam/aws//modules/iam-role"
@@ -115,9 +81,14 @@ module "notification_lambda_role" {
   }
 }
 
-resource "aws_iam_policy" "ecs_s3_policy" {
-  name        = "${var.project_name}-s3-policy"
-  description = "Allow ecs to upload/delete images in S3"
+# ==============================================================================
+# IAM ポリシー
+# ==============================================================================
+
+# S3 アクセス（画像バケット）
+resource "aws_iam_policy" "lambda_s3_policy" {
+  name        = "${var.project_name}-lambda-s3-policy"
+  description = "Allow Lambda to upload/delete images in S3"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -144,10 +115,10 @@ resource "aws_iam_policy" "ecs_s3_policy" {
   })
 }
 
-# ECSタスク用のIAMポリシー（このドメインからのみ送信を許可）
+# SES 送信
 resource "aws_iam_policy" "ses_send_policy" {
   name        = "${var.project_name}-ses-send-policy"
-  description = "Allow ECS task to send email via SES domain"
+  description = "Allow sending email via SES domain"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -161,115 +132,10 @@ resource "aws_iam_policy" "ses_send_policy" {
   })
 }
 
-# FireLens経由でCloudWatch Logsにログを送信するためのポリシー
-resource "aws_iam_policy" "firelens_cloudwatch_logs" {
-  name = "${var.project_name}-firelens-cloudwatch-logs"
-
-  policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [
-      {
-        Sid    = "AllowWriteCloudWatchLogs",
-        Effect = "Allow",
-        Action = [
-          "logs:CreateLogStream",
-          "logs:PutLogEvents",
-          "logs:DescribeLogStreams"
-        ],
-        Resource = [
-          "${aws_cloudwatch_log_group.ecs_log.arn}:log-stream:*"
-        ]
-      }
-    ]
-  })
-}
-
-# ECS実行ロールにSSMの読み取り権限を追加するポリシー
-resource "aws_iam_policy" "ecs_execution_ssm_policy" {
-  name = "${var.project_name}-execution-ssm-policy"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "ssm:GetParameters",
-          "ssm:GetParameter"
-        ]
-        Resource = [
-          data.aws_ssm_parameter.db_password.arn,
-          data.aws_ssm_parameter.app_key.arn,
-          data.aws_ssm_parameter.google_client_id.arn,
-          data.aws_ssm_parameter.google_client_secret.arn,
-          aws_ssm_parameter.otel_collector_config.arn
-        ]
-      }
-      # カスタムKMSキーでSecureStringを暗号化している場合は以下のkms:Decryptが必要
-      # AWS管理キー（aws/ssm）で暗号化している場合は不要（SSM API経由で暗黙的に復号される）
-      # {
-      #   Effect = "Allow"
-      #   Action = ["kms:Decrypt"]
-      #   Resource = "<カスタムKMSキーのARN>"
-      # }
-    ]
-  })
-}
-
-# 稼働中のECSタスクのコンテナに「リモートで入る」ための通信を許可するポリシー
-resource "aws_iam_policy" "ecs_exec_policy" {
-  name = "${var.project_name}-ecs-exec-policy"
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "ssmmessages:CreateControlChannel",
-        "ssmmessages:CreateDataChannel",
-        "ssmmessages:OpenControlChannel",
-        "ssmmessages:OpenDataChannel"
-      ]
-      Resource = "*"
-    }]
-  })
-}
-
-# --- EventBridge が ECS タスクを起動するためのポリシー ---
-resource "aws_iam_policy" "eventbridge_ecs_run_task" {
-  name        = "${var.project_name}-eventbridge-ecs-run-task"
-  description = "Allow EventBridge to run ECS batch tasks"
-
-  #正規表現 "/:[0-9]+$/" は「末尾の :数字」を指す。これを ":*" に置換することで、タスク定義のバージョンに関係なく全てのバージョンを対象にできる。
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "AllowRunTask"
-        Effect = "Allow"
-        Action = "ecs:RunTask"
-        Resource = replace(
-          aws_ecs_task_definition.batch_daily_report.arn,
-          "/:[0-9]+$/",
-          ":*"
-        )
-      },
-      {
-        Sid    = "AllowPassRole"
-        Effect = "Allow"
-        Action = "iam:PassRole"
-        Resource = [
-          module.ecs_task_execution_role.arn,
-          module.ecs_task_role.arn
-        ]
-      }
-    ]
-  })
-}
-
-# --- SQS アクセス用 IAM ポリシー ---
+# SQS アクセス
 resource "aws_iam_policy" "sqs_queue_policy" {
   name        = "${var.project_name}-sqs-queue-policy"
-  description = "Allow ECS tasks to send/receive messages from SQS queue"
+  description = "Allow Lambda to send/receive messages from SQS queue"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -291,7 +157,66 @@ resource "aws_iam_policy" "sqs_queue_policy" {
   })
 }
 
-# 通知用のLambda関数がLaravelのCloudWatch Logsを読み取れるようにするポリシー
+# SSM パラメータ読み取り
+resource "aws_iam_policy" "lambda_ssm_policy" {
+  name = "${var.project_name}-lambda-ssm-policy"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameters",
+          "ssm:GetParameter"
+        ]
+        Resource = [
+          data.aws_ssm_parameter.db_password.arn,
+          data.aws_ssm_parameter.app_key.arn,
+          data.aws_ssm_parameter.google_client_id.arn,
+          data.aws_ssm_parameter.google_client_secret.arn,
+        ]
+      }
+    ]
+  })
+}
+
+# RDS Proxy IAM 認証
+resource "aws_iam_policy" "lambda_rds_proxy_policy" {
+  name        = "${var.project_name}-lambda-rds-proxy-policy"
+  description = "Allow Lambda to connect to RDS Proxy via IAM auth"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "rds-db:connect"
+        Resource = "arn:aws:rds-db:ap-northeast-1:${data.aws_caller_identity.current.account_id}:dbuser:${aws_db_proxy.main.id}/${var.db_username}"
+      }
+    ]
+  })
+}
+
+# EventBridge → Lambda 呼び出し
+resource "aws_iam_policy" "eventbridge_lambda_invoke" {
+  name        = "${var.project_name}-eventbridge-lambda-invoke"
+  description = "Allow EventBridge to invoke Lambda functions"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowInvokeLambda"
+        Effect = "Allow"
+        Action = "lambda:InvokeFunction"
+        Resource = aws_lambda_function.daily_report.arn
+      }
+    ]
+  })
+}
+
+# 通知 Lambda 用: CloudWatch Logs 読み取り
 resource "aws_iam_policy" "lambda_read_laravel_logs" {
   name = "${var.project_name}-lambda-read-laravel-logs"
   policy = jsonencode({
@@ -304,7 +229,7 @@ resource "aws_iam_policy" "lambda_read_laravel_logs" {
           "logs:FilterLogEvents"
         ]
         Resource = [
-          "${aws_cloudwatch_log_group.ecs_log.arn}:*"
+          "${aws_cloudwatch_log_group.lambda_api_log.arn}:*"
         ]
       }
     ]

@@ -31,22 +31,16 @@ resource "aws_route53_record" "frontend_record_aaaa" {
   }
 }
 
-# Backend (ALB) へのエイリアス
+# Backend (API Gateway) へのエイリアス
 resource "aws_route53_record" "backend_record" {
-  # どのホストゾーンに追加するか
   zone_id = data.aws_route53_zone.main.zone_id
+  name    = "${var.sub_backend_domain_name}.${var.domain_name}"
+  type    = "A"
 
-  # どんなサブドメインにするか
-  name = "${var.sub_backend_domain_name}.${var.domain_name}"
-
-  # Aレコード（IPv4アドレスへの紐付け）
-  type = "A"
-
-  # 【重要】ALBへの転送設定 (CNAMEではなくAliasを使うのがAWSの定石)
   alias {
-    name                   = aws_lb.main.dns_name # 作成したALBのDNS名
-    zone_id                = aws_lb.main.zone_id  # 作成したALBのホストゾーンID
-    evaluate_target_health = true
+    name                   = aws_apigatewayv2_domain_name.api.domain_name_configuration[0].target_domain_name
+    zone_id                = aws_apigatewayv2_domain_name.api.domain_name_configuration[0].hosted_zone_id
+    evaluate_target_health = false
   }
 }
 

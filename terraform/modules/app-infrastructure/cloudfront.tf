@@ -96,23 +96,15 @@ resource "aws_cloudfront_distribution" "frontend_cdn" {
     origin_access_control_id = aws_cloudfront_origin_access_control.s3_oac_frontend.id
   }
 
-  #  バックエンド用オリジン
+  # バックエンド用オリジン（API Gateway カスタムドメイン）
   origin {
-    # バックエンドのドメイン (例: api.example.com)
-    domain_name = "${var.sub_backend_domain_name}.${var.domain_name}"
-    origin_id   = "backend-api" //terraform内の紐づけid
+    domain_name = aws_apigatewayv2_domain_name.api.domain_name_configuration[0].target_domain_name
+    origin_id   = "backend-api"
 
-    # CloudFront経由のみALBアクセスを許可するためのカスタムヘッダー
-    custom_header {
-      name  = "X-CloudFront-Secret"
-      value = random_password.cf_secret.result
-    }
-
-    # バックエンドがHTTPSの場合の設定
     custom_origin_config {
-      http_port              = 80 //多分設定しなくても同じ
+      http_port              = 80
       https_port             = 443
-      origin_protocol_policy = "https-only" # バックエンドへはHTTPSで通信
+      origin_protocol_policy = "https-only"
       origin_ssl_protocols   = ["TLSv1.2"]
     }
   }
@@ -120,7 +112,7 @@ resource "aws_cloudfront_distribution" "frontend_cdn" {
   # /api/* に来たリクエストをバックエンドへ流す
   ordered_cache_behavior {
     path_pattern     = "/api/*"
-    target_origin_id = "backend-api" # 上で定義したIDを指定
+    target_origin_id = "backend-api"
 
     # APIなので全メソッド許可
     allowed_methods = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]

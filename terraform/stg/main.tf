@@ -8,7 +8,6 @@ module "app" {
   db_name                  = var.db_name
   db_username              = var.db_username
   parameter_store_path     = var.parameter_store_path
-  image_tag                = var.image_tag
   enable_nat_gateway       = var.enable_nat_gateway
   alert_email_to           = var.alert_email_to
   app_env                  = var.app_env

@@ -1,48 +1,13 @@
-# ALB用: インターネットからのHTTP(80)を許可
-resource "aws_security_group" "alb_sg" {
-  name   = "${var.project_name}-alb-sg"
-  vpc_id = module.vpc.vpc_id
-
-  # HTTP (80)
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # HTTPS (443) - ここがメインの通信
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-#ECS用SG
-resource "aws_security_group" "ecs_sg" {
-  name        = "${var.project_name}-ecs-sg"
-  description = "${var.project_name}-ecs-sg"
+# Lambda 用 SG
+resource "aws_security_group" "lambda_sg" {
+  name        = "${var.project_name}-lambda-sg"
+  description = "${var.project_name}-lambda-sg"
   vpc_id      = module.vpc.vpc_id
 
-  ingress {
-    from_port       = 80
-    to_port         = 80
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb_sg.id]
-  }
-
-  # 送信ルール (egress)
+  # Lambda は呼び出されるため ingress 不要
+  # NAT Gateway 経由で外部サービス（Google OAuth、SES 等）にアクセス
   egress {
-    description = "Allow outbound to Backend APIs"
+    description = "Allow all outbound traffic"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -50,22 +15,49 @@ resource "aws_security_group" "ecs_sg" {
   }
 
   tags = {
-    Name = "${var.project_name}-ecs-sg"
+    Name = "${var.project_name}-lambda-sg"
   }
 }
 
-# RDS用SG
+# RDS Proxy 用 SG
+resource "aws_security_group" "rds_proxy_sg" {
+  name        = "${var.project_name}-rds-proxy-sg"
+  description = "${var.project_name}-rds-proxy-sg"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {
+    description     = "MySQL from Lambda"
+    from_port       = 3306
+    to_port         = 3306
+    protocol        = "tcp"
+    security_groups = [aws_security_group.lambda_sg.id]
+  }
+
+  egress {
+    description = "Allow outbound to RDS"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.project_name}-rds-proxy-sg"
+  }
+}
+
+# RDS 用 SG
 resource "aws_security_group" "rds_sg" {
   name        = "${var.project_name}-rds-sg"
   description = "${var.project_name}-rds-sg"
   vpc_id      = module.vpc.vpc_id
 
   ingress {
-    description     = "from ecs-sg(${var.project_name}-ecs-sg)"
+    description     = "MySQL from RDS Proxy"
     from_port       = 3306
     to_port         = 3306
     protocol        = "tcp"
-    security_groups = [aws_security_group.ecs_sg.id]
+    security_groups = [aws_security_group.rds_proxy_sg.id]
   }
 
   tags = { Name = "${var.project_name}-rds-sg" }

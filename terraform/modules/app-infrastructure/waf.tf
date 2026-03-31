@@ -1,9 +1,3 @@
-# CloudFront → ALB のカスタムヘッダー検証用シークレット
-resource "random_password" "cf_secret" {
-  length  = 32
-  special = false
-}
-
 # CloudFront用 WAF Web ACL (us-east-1 必須)
 resource "aws_wafv2_web_acl" "cloudfront_waf" {
   provider = aws.us_east_1

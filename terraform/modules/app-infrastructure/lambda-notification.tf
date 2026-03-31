@@ -169,5 +169,5 @@ resource "aws_lambda_permission" "allow_cloudwatch_logs_invoke" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.notification_function.function_name
   principal     = "logs.ap-northeast-1.amazonaws.com"
-  source_arn    = "${aws_cloudwatch_log_group.ecs_log.arn}:*"
+  source_arn    = "${aws_cloudwatch_log_group.lambda_api_log.arn}:*"
 }

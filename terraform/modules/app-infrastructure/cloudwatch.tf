@@ -1,77 +1,93 @@
-# --- CloudWatch Log Group ---
-resource "aws_cloudwatch_log_group" "ecs_log" {
-  name              = "/ecs/${var.project_name}"
-  retention_in_days = 30 //30日で消す
+# ==============================================================================
+# CloudWatch ロググループ
+# ==============================================================================
+
+# API Lambda 用ロググループ
+resource "aws_cloudwatch_log_group" "lambda_api_log" {
+  name              = "/aws/lambda/${var.project_name}-api"
+  retention_in_days = 30
 }
 
-# staging.ERROR または staging.CRITICAL を Lambda に流す
-resource "aws_cloudwatch_log_subscription_filter" "laravel_error_critical_to_lambda" {
-  name           = "${var.project_name}-laravel-error-to-lambda"
-  log_group_name = aws_cloudwatch_log_group.ecs_log.name
+# SQS ワーカー Lambda 用ロググループ
+resource "aws_cloudwatch_log_group" "lambda_sqs_worker_log" {
+  name              = "/aws/lambda/${var.project_name}-sqs-worker"
+  retention_in_days = 30
+}
 
-  # どちらかを含めばマッチ（OR）
-  filter_pattern  = "?${var.app_env}.ERROR ?${var.app_env}.CRITICAL"
+# マイグレーション Lambda 用ロググループ
+resource "aws_cloudwatch_log_group" "lambda_migration_log" {
+  name              = "/aws/lambda/${var.project_name}-migration"
+  retention_in_days = 30
+}
+
+# 日次レポート Lambda 用ロググループ
+resource "aws_cloudwatch_log_group" "lambda_daily_report_log" {
+  name              = "/aws/lambda/${var.project_name}-daily-report"
+  retention_in_days = 30
+}
+
+# ==============================================================================
+# CloudWatch ログサブスクリプションフィルター（エラー通知 Lambda へ）
+# ==============================================================================
+
+# API Lambda のエラーログを通知 Lambda に流す
+resource "aws_cloudwatch_log_subscription_filter" "lambda_error_to_notification" {
+  name           = "${var.project_name}-lambda-error-to-notification"
+  log_group_name = aws_cloudwatch_log_group.lambda_api_log.name
+
+  # ERROR または CRITICAL を含むログをマッチ
+  filter_pattern  = "?ERROR ?CRITICAL"
   destination_arn = aws_lambda_function.notification_function.arn
 
-  # 権限が先にないと作成に失敗するので依存関係を明示
   depends_on = [aws_lambda_permission.allow_cloudwatch_logs_invoke]
 }
 
-# --- CloudWatch Alarm (Metric Math) ---
-resource "aws_cloudwatch_metric_alarm" "ecs_running_less_than_desired" {
-  alarm_name        = "${var.project_name}-ecs-running-less-than-desired"
-  alarm_description = "ECS service running tasks is less than desired tasks"
+# ==============================================================================
+# CloudWatch アラーム（Lambda エラー監視）
+# ==============================================================================
 
-  # expression が 1 になったらアラーム
-  comparison_operator = "GreaterThanOrEqualToThreshold"
-  threshold           = 1
-
+# API Lambda のエラー率アラーム
+resource "aws_cloudwatch_metric_alarm" "lambda_api_errors" {
+  alarm_name          = "${var.project_name}-lambda-api-errors"
+  alarm_description   = "API Lambda function errors detected"
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = 0
   evaluation_periods  = 1
   datapoints_to_alarm = 1
+  treat_missing_data  = "notBreaching"
 
-  # メトリクス未取得で誤爆しないように（必要なら "breaching" に変える）
-  treat_missing_data = "notBreaching"
+  metric_name = "Errors"
+  namespace   = "AWS/Lambda"
+  statistic   = "Sum"
+  period      = 60
+
+  dimensions = {
+    FunctionName = aws_lambda_function.api.function_name
+  }
 
   alarm_actions = [aws_sns_topic.ecs_task_shortage.arn]
   ok_actions    = [aws_sns_topic.ecs_task_shortage.arn]
+}
 
-  # 現在 RUNNING のタスク数
-  metric_query {
-    id = "m_running"
-    metric {
-      namespace   = "ECS/ContainerInsights"
-      metric_name = "RunningTaskCount"
-      dimensions = {
-        ClusterName = aws_ecs_cluster.main.name
-        ServiceName = aws_ecs_service.main.name
-      }
-      period = 60
-      stat   = "Minimum"
-    }
-    return_data = false
+# API Lambda のスロットリングアラーム
+resource "aws_cloudwatch_metric_alarm" "lambda_api_throttles" {
+  alarm_name          = "${var.project_name}-lambda-api-throttles"
+  alarm_description   = "API Lambda function throttles detected"
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = 0
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  treat_missing_data  = "notBreaching"
+
+  metric_name = "Throttles"
+  namespace   = "AWS/Lambda"
+  statistic   = "Sum"
+  period      = 60
+
+  dimensions = {
+    FunctionName = aws_lambda_function.api.function_name
   }
 
-  # Desired（目標タスク数）
-  metric_query {
-    id = "m_desired"
-    metric {
-      namespace   = "ECS/ContainerInsights"
-      metric_name = "DesiredTaskCount"
-      dimensions = {
-        ClusterName = aws_ecs_cluster.main.name
-        ServiceName = aws_ecs_service.main.name
-      }
-      period = 60
-      stat   = "Minimum"
-    }
-    return_data = false
-  }
-
-  # 不足していたら 1、そうでなければ 0
-  metric_query {
-    id          = "e_shortage"
-    expression  = "IF(m_running < m_desired, 1, 0)"
-    label       = "running < desired"
-    return_data = true
-  }
+  alarm_actions = [aws_sns_topic.ecs_task_shortage.arn]
+  ok_actions    = [aws_sns_topic.ecs_task_shortage.arn]
 }

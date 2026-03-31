@@ -7,10 +7,7 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.6"
     }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.6"
-    }
+
   }
   backend "s3" {
     bucket = "github-action-terraform-tf-state-bucket" # 直接名前を書く

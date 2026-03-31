@@ -33,11 +33,6 @@ variable "parameter_store_path" {
   type        = string
 }
 
-variable "image_tag" {
-  description = "ECRのイメージタグ"
-  type        = string
-}
-
 variable "enable_nat_gateway" {
   description = "NAT Gatewayを有効化するかどうか"
   type        = bool

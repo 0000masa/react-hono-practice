@@ -15,16 +15,6 @@ data "aws_ssm_parameter" "google_client_secret" {
   with_decryption = true
 }
 
-data "aws_ssm_parameter" "ecr_repo_url_nginx" {
-  name            = "${var.parameter_store_path}ecr_repo_url_nginx"
-  with_decryption = true
-}
-
-data "aws_ssm_parameter" "ecr_repo_url_backend" {
-  name            = "${var.parameter_store_path}ecr_repo_url_backend"
-  with_decryption = true
-}
-
 data "aws_ssm_parameter" "app_key" {
   name            = "${var.parameter_store_path}app_key"
   with_decryption = true
@@ -50,7 +40,7 @@ data "aws_cloudfront_origin_request_policy" "all_viewer" {
   name = "Managed-AllViewer"
 }
 
-# Lambda用のzipファイル
+# 通知 Lambda 用の zip ファイル
 data "archive_file" "lambda_zip" {
   type        = "zip"
   source_file = local_file.lambda_py.filename
