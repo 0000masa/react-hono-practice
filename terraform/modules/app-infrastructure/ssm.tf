@@ -35,7 +35,7 @@ resource "aws_ssm_parameter" "cloudfront_distribution_id" {
 resource "aws_ssm_parameter" "backend_url" {
   name  = "${var.parameter_store_path}backend_url"
   type  = "String"
-  value = "https://${var.sub_backend_domain_name}.${var.domain_name}"
+  value = "https://${var.sub_frontend_domain_name}.${var.domain_name}"
 }
 
 # Lambda 関数名の保存（CI/CD でのデプロイ用）

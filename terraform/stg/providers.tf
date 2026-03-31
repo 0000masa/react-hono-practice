@@ -20,10 +20,26 @@ terraform {
 
 provider "aws" {
   region = "ap-northeast-1"
+
+  default_tags {
+    tags = {
+      Environment = var.app_env
+      Service     = var.project_name
+      ManagedBy   = "terraform"
+    }
+  }
 }
 
 # CloudFrontの証明書用 (バージニア北部)
 provider "aws" {
   alias  = "us_east_1"
   region = "us-east-1"
+
+  default_tags {
+    tags = {
+      Environment = var.app_env
+      Service     = var.project_name
+      ManagedBy   = "terraform"
+    }
+  }
 }

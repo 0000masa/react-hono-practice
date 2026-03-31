@@ -46,23 +46,6 @@ resource "aws_apigatewayv2_route" "default" {
   target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
 }
 
-# --- カスタムドメイン ---
-resource "aws_apigatewayv2_domain_name" "api" {
-  domain_name = "${var.sub_backend_domain_name}.${var.domain_name}"
-
-  domain_name_configuration {
-    certificate_arn = aws_acm_certificate_validation.cert_backend.certificate_arn
-    endpoint_type   = "REGIONAL"
-    security_policy = "TLS_1_2"
-  }
-}
-
-# --- API マッピング ---
-resource "aws_apigatewayv2_api_mapping" "api" {
-  api_id      = aws_apigatewayv2_api.main.id
-  domain_name = aws_apigatewayv2_domain_name.api.id
-  stage       = aws_apigatewayv2_stage.default.id
-}
 
 # --- API Gateway アクセスログ用ロググループ ---
 resource "aws_cloudwatch_log_group" "api_gateway_log" {

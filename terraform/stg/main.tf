@@ -4,7 +4,6 @@ module "app" {
   project_name             = var.project_name
   domain_name              = var.domain_name
   sub_frontend_domain_name = var.sub_frontend_domain_name
-  sub_backend_domain_name  = var.sub_backend_domain_name
   db_name                  = var.db_name
   db_username              = var.db_username
   parameter_store_path     = var.parameter_store_path

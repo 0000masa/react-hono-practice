@@ -96,9 +96,11 @@ resource "aws_cloudfront_distribution" "frontend_cdn" {
     origin_access_control_id = aws_cloudfront_origin_access_control.s3_oac_frontend.id
   }
 
-  # バックエンド用オリジン（API Gateway カスタムドメイン）
+  # バックエンド用オリジン（API Gateway デフォルトドメイン）
+  # api_endpoint は "https://xxx.execute-api.region.amazonaws.com" 形式だが、
+  # origin の domain_name にはプロトコル無しのホスト名が必要なため replace で除去
   origin {
-    domain_name = aws_apigatewayv2_domain_name.api.domain_name_configuration[0].target_domain_name
+    domain_name = replace(aws_apigatewayv2_api.main.api_endpoint, "https://", "")
     origin_id   = "backend-api"
 
     custom_origin_config {

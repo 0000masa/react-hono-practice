@@ -1,7 +1,6 @@
 project_name             = "kum"
 domain_name              = "favoritemyanime.com"
 sub_frontend_domain_name = "www"
-sub_backend_domain_name  = "api"
 db_name                  = "kum_db"
 db_username              = "admin"
 parameter_store_path     = "/kum/stg/"

@@ -13,11 +13,6 @@ variable "sub_frontend_domain_name" {
   type        = string
 }
 
-variable "sub_backend_domain_name" {
-  description = "Route53のサブドメイン名(バックエンド)"
-  type        = string
-}
-
 variable "db_name" {
   description = "RDSのデータベース名"
   type        = string

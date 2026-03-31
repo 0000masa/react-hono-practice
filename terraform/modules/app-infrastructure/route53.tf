@@ -31,21 +31,6 @@ resource "aws_route53_record" "frontend_record_aaaa" {
   }
 }
 
-# Backend (API Gateway) へのエイリアス
-resource "aws_route53_record" "backend_record" {
-  zone_id = data.aws_route53_zone.main.zone_id
-  name    = "${var.sub_backend_domain_name}.${var.domain_name}"
-  type    = "A"
-
-  alias {
-    name                   = aws_apigatewayv2_domain_name.api.domain_name_configuration[0].target_domain_name
-    zone_id                = aws_apigatewayv2_domain_name.api.domain_name_configuration[0].hosted_zone_id
-    evaluate_target_health = false
-  }
-}
-
-
-
 # ② 検証用DNSレコードの作成（Route53への登録）
 # ACMが「このレコードを追加して所有権を証明しろ」と言ってくる情報を自動登録します
 resource "aws_route53_record" "cert_validation_frontend" {
@@ -57,22 +42,6 @@ resource "aws_route53_record" "cert_validation_frontend" {
     }
   }
 
-  allow_overwrite = true
-  name            = each.value.name
-  records         = [each.value.record]
-  ttl             = 60
-  type            = each.value.type
-  zone_id         = data.aws_route53_zone.main.zone_id
-}
-
-resource "aws_route53_record" "cert_validation_backend" {
-  for_each = {
-    for item in aws_acm_certificate.cert_backend.domain_validation_options : item.domain_name => {
-      name   = item.resource_record_name
-      record = item.resource_record_value
-      type   = item.resource_record_type
-    }
-  }
   allow_overwrite = true
   name            = each.value.name
   records         = [each.value.record]
