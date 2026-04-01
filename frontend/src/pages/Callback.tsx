@@ -21,7 +21,7 @@ const Callback: React.FC = () => {
         }
 
         // セッションで認証状態を確認（バックエンドでAuth::login()が実行済み）
-        const response = await apiClient.get('/auth/user');
+        const response = await apiClient.get<{ user: { id: number; name: string; email: string; avatar_url: string | null } }>('/auth/user');
         
         // ユーザー情報を保存
         login(response.data.user);

@@ -29,7 +29,7 @@ const UserList: React.FC = () => {
     const fetchUsers = async () => {
       try {
         setLoading(true);
-        const response = await apiClient.get('/users', {
+        const response = await apiClient.get<{ users: User[]; pagination: Pagination }>('/users', {
           params: { page: currentPage },
         });
         setUsers(response.data.users);

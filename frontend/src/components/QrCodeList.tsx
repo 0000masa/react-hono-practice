@@ -36,7 +36,7 @@ const QrCodeList: React.FC = () => {
   const fetchQrcodes = async (page: number) => {
     try {
       setLoading(true);
-      const response = await apiClient.get('/qrcodes', {
+      const response = await apiClient.get<{ qrcodes: QrCode[]; pagination: Pagination }>('/qrcodes', {
         params: { page },
       });
       setQrcodes(response.data.qrcodes);

@@ -27,22 +27,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // 認証状態を確認（セッションから取得）
   const checkAuth = async () => {
     try {
-      const response = await apiClient.get('/auth/user');
+      const response = await apiClient.get<{ user: User }>('/auth/user');
       setUser(response.data.user);
     } catch (error) {
       // 401エラー（未認証）の場合は正常な状態なので、エラーを無視
-      if (error && typeof error === 'object' && 'response' in error) {
-        const axiosError = error as { response?: { status?: number } };
-        if (axiosError.response?.status === 401) {
-          setUser(null);
-        } else {
-          console.error('認証確認エラー:', error);
-          setUser(null);
-        }
-      } else {
+      const status = error && typeof error === 'object' && 'status' in error
+        ? (error as { status?: number }).status
+        : undefined;
+      if (status !== 401) {
         console.error('認証確認エラー:', error);
-        setUser(null);
       }
+      setUser(null);
     } finally {
       setIsLoading(false);
     }

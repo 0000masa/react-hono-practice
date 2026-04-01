@@ -34,7 +34,7 @@ const Login: React.FC = () => {
   // Google認証URLを取得してリダイレクト
   const handleGoogleLogin = async () => {
     try {
-      const response = await apiClient.get('/auth/google');
+      const response = await apiClient.get<{ url: string }>('/auth/google');
       // バックエンドから返されたGoogle認証URLにリダイレクト
       window.location.href = response.data.url;
     } catch (error) {
