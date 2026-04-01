@@ -4,10 +4,12 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "esbuild src/index.ts --bundle --platform=node --outfile=dist/index.js --packages=external",
+    "build:lambda": "esbuild src/lambda.ts --bundle --platform=node --outfile=dist/lambda.js --target=node20 --external:@aws-sdk/*",
     "start": "node dist/index.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1012.0",
+    "@aws-sdk/rds-signer": "^3.1012.0",
     "@hono/node-server": "^1.19.11",
     "@hono/zod-validator": "^0.7.6",
     "arctic": "^3.7.0",

@@ -154,24 +154,44 @@ API Gateway REST API → 403 Forbidden（API キー無し）
   ※ Lambda は起動しない = コスト発生しない
 ```
 
-## バックエンド側の必要な変更（TODO）
+## バックエンド側の変更
 
 Terraform の変更だけでは完結しない。バックエンドのアプリケーションコードにも以下の変更が必要。
 
-### 1. Lambda エントリーポイントの作成
+### 1. エントリーポイントの設計
 
-`backend/src/lambda.ts` を作成し、`hono/aws-lambda` アダプターを使用:
+Hono アプリ本体（`src/app.ts`）はデプロイ先に依存しない。エントリーポイントをデプロイ先ごとに分離することで、Lambda 以外（Cloudflare Workers 等）にも対応できる構成にしている。
 
-```typescript
-import { handle } from 'hono/aws-lambda'
-import app from './app'
-export const handler = handle(app)
+```
+src/
+├── app.ts       # Hono アプリ本体（共通、デプロイ先に依存しない）
+├── index.ts     # Node.js 用エントリーポイント（ローカル開発）
+└── lambda.ts    # AWS Lambda 用エントリーポイント
 ```
 
-### 2. esbuild ビルドスクリプトの追加
+`src/lambda.ts`:
+
+```typescript
+import { handle } from 'hono/aws-lambda';
+import { initDatabase } from './config/database';
+import app from './app';
+
+const dbReady = initDatabase();
+const lambdaHandler = handle(app);
+
+export const handler = async (event: any, context: any) => {
+  await dbReady;
+  return lambdaHandler(event, context);
+};
+```
+
+### 2. ビルドスクリプト
+
+デプロイ先ごとにビルドスクリプトを分離:
 
 ```json
 {
+  "build": "esbuild src/index.ts --bundle --platform=node --outfile=dist/index.js --packages=external",
   "build:lambda": "esbuild src/lambda.ts --bundle --platform=node --outfile=dist/lambda.js --target=node20 --external:@aws-sdk/*"
 }
 ```
@@ -180,26 +200,31 @@ export const handler = handle(app)
 
 ### 3. RDS Proxy IAM 認証対応
 
-`DATABASE_USE_IAM_AUTH=true` の場合、`@aws-sdk/rds-signer` で認証トークンを生成して接続:
+`DATABASE_USE_IAM_AUTH` 環境変数で開発環境と本番環境の DB 接続を切り替える:
+
+| | 開発環境 | 本番環境 (Lambda) |
+|---|---|---|
+| `DATABASE_USE_IAM_AUTH` | 未設定 (`false`) | `true` |
+| 接続先 | ローカル MySQL (Docker) | RDS Proxy |
+| 認証 | パスワード（同期的に初期化） | IAM トークン（非同期で初期化） |
+| コネクション数 | 10 | 1（RDS Proxy がプールを管理） |
+| SSL | 不要 | 必須（`ssl: { rejectUnauthorized: true }`） |
+
+`src/config/database.ts` で `DATABASE_USE_IAM_AUTH` が `false`（開発環境）の場合はモジュール読み込み時に同期的にプールを作成する。`true`（本番）の場合は `initDatabase()` で `@aws-sdk/rds-signer` を動的インポートして IAM トークンを生成する。
 
 ```typescript
-import { Signer } from '@aws-sdk/rds-signer'
-
-const signer = new Signer({
-  hostname: process.env.DATABASE_HOST,
-  port: 3306,
-  username: process.env.DATABASE_USERNAME,
-})
-const token = await signer.getAuthToken()
-// token をパスワードとして mysql2 接続に使用
-// ssl: { rejectUnauthorized: true } も必要
+// 開発環境: db はモジュール読み込み時に初期化済み → そのまま使える
+// 本番環境: Lambda エントリーポイントが initDatabase() を呼んでから使う
+import { db } from '../config/database';
 ```
 
-### 4. SQS ワーカーハンドラーの作成
+ESM の live binding により、`initDatabase()` で `db` が代入された後は各モジュールから最新の値が参照されるため、既存の import をそのまま使える。
+
+### 4. SQS ワーカーハンドラーの作成（TODO）
 
 `backend/src/sqs-handler.ts` で SQS イベントを受け取り QR コード生成処理を実行。
 
-### 5. マイグレーション / 日次レポートハンドラーの作成
+### 5. マイグレーション / 日次レポートハンドラーの作成（TODO）
 
 それぞれ `backend/src/migrate.ts`、`backend/src/daily-report.ts` を作成。
 

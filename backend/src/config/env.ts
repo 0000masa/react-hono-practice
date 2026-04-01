@@ -17,8 +17,9 @@ export const env = {
   DATABASE_HOST: getEnv('DATABASE_HOST', 'mysql'),
   DATABASE_PORT: parseInt(getEnv('DATABASE_PORT', '3306'), 10),
   DATABASE_NAME: getEnv('DATABASE_NAME', 'database'),
-  DATABASE_USER: getEnv('DATABASE_USER', 'user'),
+  DATABASE_USERNAME: getEnv('DATABASE_USERNAME', process.env.DATABASE_USER ?? 'user'),
   DATABASE_PASSWORD: getEnv('DATABASE_PASSWORD', 'password'),
+  DATABASE_USE_IAM_AUTH: getEnv('DATABASE_USE_IAM_AUTH', 'false') === 'true',
 
   GOOGLE_CLIENT_ID: getEnv('GOOGLE_CLIENT_ID', ''),
   GOOGLE_CLIENT_SECRET: getEnv('GOOGLE_CLIENT_SECRET', ''),
