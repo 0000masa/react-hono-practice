@@ -1,4 +1,4 @@
-import { drizzle } from 'drizzle-orm/mysql2';
+import { drizzle, type MySql2Database } from 'drizzle-orm/mysql2';
 import mysql from 'mysql2/promise';
 import { env } from './env';
 import * as schema from '../db/schema';
@@ -6,7 +6,7 @@ import * as schema from '../db/schema';
 // 開発環境: 通常のパスワード認証（同期的に初期化）
 // 本番環境 (DATABASE_USE_IAM_AUTH=true): initDatabase() で非同期初期化が必要
 let pool: mysql.Pool;
-let db: ReturnType<typeof drizzle>;
+let db: MySql2Database<typeof schema> & { $client: mysql.Pool };
 
 if (!env.DATABASE_USE_IAM_AUTH) {
   pool = mysql.createPool({
