@@ -36,6 +36,8 @@ export const env = {
   S3_FORCE_PATH_STYLE: getEnv('S3_FORCE_PATH_STYLE', 'true') === 'true',
   STORAGE_URL_BASE: getEnv('STORAGE_URL_BASE', 'http://localhost:9000/qrcodes'),
 
+  SES_REGION: getEnv('SES_REGION', ''),
+
   SMTP_HOST: getEnv('SMTP_HOST', 'mailpit'),
   SMTP_PORT: parseInt(getEnv('SMTP_PORT', '1025'), 10),
   SMTP_SECURE: getEnv('SMTP_SECURE', 'false') === 'true',

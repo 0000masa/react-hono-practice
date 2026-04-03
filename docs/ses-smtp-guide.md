@@ -1,4 +1,25 @@
-# AWS SES SMTP メール送信ガイド
+# AWS SES メール送信ガイド
+
+## 本プロジェクトの構成
+
+本プロジェクトでは **SDK / SES API** を使ったやり方でメールを送信している。
+
+- **開発環境**: Mailpit（Docker Compose のローカル SMTP サーバー）で Nodemailer 経由で送信
+- **本番環境**: AWS SDK（`@aws-sdk/client-ses`）で SES API を直接呼び出して送信（Lambda + IAM ロール認証）
+
+`SES_REGION` 環境変数が設定されていれば SES SDK、未設定なら Nodemailer SMTP という分岐で、同じコードが開発/本番の両方で動作する。
+
+### メール送信処理のファイル一覧
+
+| ファイル | 役割 |
+|---------|------|
+| `backend/src/config/mail.ts` | メール送信関数（SES SDK / Nodemailer の分岐ロジック） |
+| `backend/src/services/mail.service.ts` | メール送信サービス（HTML テンプレート生成 + 送信関数の呼び出し） |
+| `backend/src/controllers/mail.controller.ts` | メール送信 API エンドポイント（バリデーション + サービス呼び出し） |
+| `terraform/modules/app-infrastructure/lambda.tf` | Lambda の SES 環境変数設定（`SES_REGION`, `MAIL_FROM`） |
+| `terraform/modules/app-infrastructure/lambda-notification.tf` | エラー通知メール Lambda（Python / boto3 SES SDK） |
+
+---
 
 ## SMTP とは
 
@@ -14,7 +35,44 @@ SMTP は「メールを送る」ためのプロトコルであり、「メール
 | 587 | クライアントからの送信（推奨） | STARTTLS |
 | 465 | クライアントからの送信（レガシー） | 暗黙的 TLS |
 
-本プロジェクトでは **ポート 587 + STARTTLS** を使用する。STARTTLS とは、最初は平文で接続し、途中から TLS 暗号化に切り替える方式。
+### STARTTLS とは
+
+**STARTTLS** は、既に確立された平文の TCP 接続を途中から TLS 暗号化接続にアップグレードするための SMTP 拡張機能（RFC 3207）。
+
+#### 通信の流れ
+
+```
+クライアント                          SMTP サーバー
+    │                                    │
+    │── TCP 接続（平文）──────────────→   │  ① まず平文で接続
+    │                                    │
+    │←─ 220 smtp.example.com Ready ────  │  ② サーバーが応答
+    │                                    │
+    │── EHLO client.example.com ───────→ │  ③ クライアントが挨拶
+    │                                    │
+    │←─ 250-STARTTLS ──────────────────  │  ④ サーバーが「STARTTLS 対応」と返答
+    │                                    │
+    │── STARTTLS ──────────────────────→ │  ⑤ クライアントが暗号化を要求
+    │                                    │
+    │←─ 220 Go ahead ─────────────────  │  ⑥ サーバーが了承
+    │                                    │
+    │══ TLS ハンドシェイク ════════════   │  ⑦ ここから暗号化通信に切り替わる
+    │                                    │
+    │── AUTH LOGIN（暗号化済み）────────→ │  ⑧ 認証情報を安全に送信
+    │── MAIL FROM / RCPT TO / DATA ───→ │  ⑨ メールを送信
+    │                                    │
+```
+
+#### 暗黙的 TLS（ポート 465）との違い
+
+| 項目 | STARTTLS（ポート 587） | 暗黙的 TLS（ポート 465） |
+|------|----------------------|------------------------|
+| **接続開始** | 平文で接続し、途中から TLS に切替 | 最初から TLS で接続 |
+| **暗号化のタイミング** | STARTTLS コマンドの後 | 接続直後 |
+| **ポート** | 587（推奨） | 465（レガシー） |
+| **Nodemailer の `secure`** | `false` | `true` |
+
+> **なぜ `SMTP_SECURE=false` でも安全なのか**: `secure=false` は「最初から TLS を使わない」という意味であり、「暗号化しない」という意味ではない。ポート 587 では STARTTLS により途中から TLS に切り替わるため、認証情報やメール本文は暗号化された状態で送信される。
 
 ---
 
@@ -63,16 +121,33 @@ AWS SES でメールを送る方法は大きく 2 つある。
 | **送信速度** | やや遅い（TCP 接続 + TLS ハンドシェイク） | 速い（HTTP/2 対応） |
 | **移植性** | 高い（SES 以外の SMTP にも切替可能） | 低い（AWS 専用コード） |
 
-### どちらを選ぶべきか
+### 本プロジェクトの選択
 
-- **SMTP がおすすめ**: ローカル開発で Mailpit を使いたい、AWS に強く依存したくない、Nodemailer を既に使っている
-- **SDK がおすすめ**: Lambda で高頻度に送信する、IAM ロールで認証したい（アクセスキー管理を避けたい）、テンプレート機能を使いたい
+本プロジェクトでは **SDK / SES API 方式**を本番環境で採用している。理由:
 
-本プロジェクトでは **開発環境で Mailpit、本番環境で SES SMTP** という構成のため、SMTP 方式が適している。
+- **Lambda との相性が良い**: HTTPS ベースなので、Lambda のステートレスな実行モデルに適している
+- **IAM ロールで認証**: Lambda に付与された IAM ロールが自動で使われるため、SMTP ユーザー名/パスワードの管理が不要
+- **SMTP 認証情報のローテーション不要**: IAM ロールは自動で認証情報が更新される
+
+一方、**開発環境では Mailpit（SMTP）** を使用している。理由:
+
+- Docker Compose で手軽に起動できる
+- 送信メールを Web UI（http://localhost:8025）で確認できる
+- AWS アカウントや SES の設定が不要
+
+```
+開発環境
+  └─ Mailpit（Docker Compose）← Nodemailer SMTP
+
+本番環境（Lambda）
+  └─ AWS SES ← SDK / SES API（本プロジェクトはこちら）
+```
 
 ---
 
 ## SES SMTP 認証情報と IAM ユーザーの関係
+
+> 本プロジェクトでは SDK/SES API 方式を使用しているため、この SMTP 認証情報は不要。SMTP 方式を使う場合のみ必要となる知識として記載する。
 
 ### 「SMTP 認証情報の作成」で何が起きるか
 
@@ -147,13 +222,22 @@ yyyy._domainkey.example.com  CNAME  yyyy.dkim.amazonses.com
 zzzz._domainkey.example.com  CNAME  zzzz.dkim.amazonses.com
 ```
 
-### ステップ 2: SMTP 認証情報の作成
+### ステップ 2: IAM ロールに SES 送信権限を付与（SDK 方式）
 
-1. SES コンソール → 「SMTP 設定」
-2. 「SMTP 認証情報の作成」をクリック
-3. IAM ユーザー名を確認（デフォルトのままで OK）
-4. 「作成」をクリック
-5. **SMTP ユーザー名と SMTP パスワードが表示される**（この画面でしか確認できないのでメモする）
+Lambda の実行ロールに `ses:SendEmail` と `ses:SendRawEmail` の権限を追加する。
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "ses:SendEmail",
+    "ses:SendRawEmail"
+  ],
+  "Resource": "*"
+}
+```
+
+本プロジェクトでは Terraform の Lambda 実行ロールモジュールでこの権限を管理している。
 
 ### ステップ 3: サンドボックスの解除（本番用）
 
@@ -168,105 +252,94 @@ zzzz._domainkey.example.com  CNAME  zzzz.dkim.amazonses.com
 
 ## Hono バックエンドでの設定
 
-### 必要な環境変数
+### 環境変数
 
-| 変数名 | 説明 | 開発環境 | 本番環境（SES SMTP） |
+| 変数名 | 説明 | 開発環境 | 本番環境（SES SDK） |
 |--------|------|----------|---------------------|
-| `SMTP_HOST` | SMTP ホスト | `mailpit` | `email-smtp.ap-northeast-1.amazonaws.com` |
-| `SMTP_PORT` | SMTP ポート | `1025` | `587` |
-| `SMTP_SECURE` | 暗黙的 TLS | `false` | `false`（STARTTLS なので） |
-| `SMTP_USER` | SMTP ユーザー名 | （空 / 不要） | SES で作成した SMTP ユーザー名 |
-| `SMTP_PASS` | SMTP パスワード | （空 / 不要） | SES で作成した SMTP パスワード |
+| `SES_REGION` | SES リージョン | （空 = SMTP 使用） | `ap-northeast-1` |
 | `MAIL_FROM` | 送信元アドレス | `noreply@example.com` | SES で検証済みのアドレス |
+| `SMTP_HOST` | SMTP ホスト（開発用） | `mailpit` | （不要） |
+| `SMTP_PORT` | SMTP ポート（開発用） | `1025` | （不要） |
+| `SMTP_SECURE` | 暗黙的 TLS（開発用） | `false` | （不要） |
 
-> **注意**: `SMTP_SECURE=false` でも通信は暗号化される。`SMTP_SECURE` は「接続開始時から TLS を使う（ポート 465）」かどうかのフラグ。ポート 587 では STARTTLS で途中から暗号化するため `false` で正しい。
+`SES_REGION` が設定されていれば SES SDK を使い、未設定なら Nodemailer SMTP を使う。
 
-### env.ts の設定例
-
-```typescript
-// 既存の SMTP 設定に追加
-SMTP_HOST: getEnv('SMTP_HOST', 'mailpit'),
-SMTP_PORT: parseInt(getEnv('SMTP_PORT', '1025'), 10),
-SMTP_SECURE: getEnv('SMTP_SECURE', 'false') === 'true',
-SMTP_USER: getEnv('SMTP_USER', ''),    // 追加
-SMTP_PASS: getEnv('SMTP_PASS', ''),    // 追加
-MAIL_FROM: getEnv('MAIL_FROM', 'noreply@example.com'),
-```
-
-### mail.ts の設定例
+### mail.ts の実装
 
 ```typescript
+import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import nodemailer from 'nodemailer';
 import { env } from './env';
 
-const auth = env.SMTP_USER
-  ? { user: env.SMTP_USER, pass: env.SMTP_PASS }
-  : undefined;
+// SES_REGION が設定されていれば SES SDK を使う
+const sesClient = env.SES_REGION
+  ? new SESClient({ region: env.SES_REGION })
+  : null;
 
-export const transporter = nodemailer.createTransport({
-  host: env.SMTP_HOST,
-  port: env.SMTP_PORT,
-  secure: env.SMTP_SECURE,
-  auth,
-});
+// SES SDK が使えない場合（開発環境）は Nodemailer SMTP
+const smtpTransporter = !sesClient
+  ? nodemailer.createTransport({
+      host: env.SMTP_HOST,
+      port: env.SMTP_PORT,
+      secure: env.SMTP_SECURE,
+    })
+  : null;
+
+export async function sendEmail(options: {
+  from: string;
+  to: string;
+  subject: string;
+  html: string;
+}): Promise<void> {
+  if (sesClient) {
+    // 本番環境: SES SDK
+    await sesClient.send(
+      new SendEmailCommand({
+        Source: options.from,
+        Destination: { ToAddresses: [options.to] },
+        Message: {
+          Subject: { Data: options.subject, Charset: 'UTF-8' },
+          Body: { Html: { Data: options.html, Charset: 'UTF-8' } },
+        },
+      }),
+    );
+  } else {
+    // 開発環境: Nodemailer SMTP（Mailpit）
+    await smtpTransporter!.sendMail({
+      from: options.from,
+      to: options.to,
+      subject: options.subject,
+      html: options.html,
+    });
+  }
+}
 ```
 
-開発環境（Mailpit）では `SMTP_USER` が空なので `auth: undefined` になり、認証なしで接続する。本番環境では SMTP 認証情報が使われる。
-
-### 本番環境の .env 例
+### 本番環境の環境変数例（Lambda）
 
 ```bash
-SMTP_HOST=email-smtp.ap-northeast-1.amazonaws.com
-SMTP_PORT=587
+SES_REGION=ap-northeast-1
+MAIL_FROM=noreply@mail.example.com
+```
+
+### 開発環境の環境変数例（.env）
+
+```bash
+SMTP_HOST=mailpit
+SMTP_PORT=1025
 SMTP_SECURE=false
-SMTP_USER=AKIAXXXXXXXXXXXXXXXX
-SMTP_PASS=BPuXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 MAIL_FROM=noreply@example.com
+# SES_REGION は未設定 → Nodemailer SMTP が使われる
 ```
 
 ---
 
-## SDK / SES API で送る場合との比較
+## SDK / SES API と SMTP 方式の認証の違い
 
-参考として、SDK を使う場合のコード例も示す。
-
-### SDK 方式のコード例
-
-```typescript
-import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
-
-const ses = new SESClient({ region: 'ap-northeast-1' });
-
-await ses.send(new SendEmailCommand({
-  Source: 'noreply@example.com',
-  Destination: { ToAddresses: ['user@example.com'] },
-  Message: {
-    Subject: { Data: '件名' },
-    Body: { Html: { Data: '<p>本文</p>' } },
-  },
-}));
-```
-
-### 認証方式の違い
-
-| 項目 | SMTP 方式 | SDK 方式 |
-|------|----------|----------|
+| 項目 | SMTP 方式 | SDK / SES API 方式 |
+|------|----------|-------------------|
 | **認証に必要なもの** | SMTP ユーザー名 + パスワード | IAM ロール or アクセスキー |
 | **Lambda での認証** | 環境変数に SMTP 認証情報を設定 | IAM ロールが自動で使われる（設定不要） |
 | **認証情報の管理** | SMTP パスワードを安全に保管する必要あり | IAM ロールなら認証情報の管理が不要 |
 | **ローテーション** | IAM アクセスキーのローテーション時に SMTP パスワードも再生成 | IAM ロールなら自動 |
-
-### まとめ: いつどちらを使うか
-
-```
-開発環境
-  └─ Mailpit（ローカル SMTP サーバー）← SMTP 方式
-
-本番環境（小〜中規模、Nodemailer 既存）
-  └─ SES SMTP ← SMTP 方式（本プロジェクトはこちら）
-
-本番環境（Lambda 大規模、AWS ネイティブ）
-  └─ SES SDK ← SDK 方式
-```
-
-本プロジェクトでは開発/本番で同じ Nodemailer コードを使い、環境変数の切り替えだけで動作するため、SMTP 方式が最適。
+| **セキュリティ** | SMTP パスワードの漏洩リスクあり | IAM ロールは一時的な認証情報を自動発行 |

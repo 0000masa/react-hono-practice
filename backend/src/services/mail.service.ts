@@ -1,4 +1,4 @@
-import { transporter } from '../config/mail';
+import { sendEmail } from '../config/mail';
 import { env } from '../config/env';
 
 export async function sendMail(
@@ -22,7 +22,7 @@ export async function sendMail(
     </html>
   `;
 
-  await transporter.sendMail({
+  await sendEmail({
     from: env.MAIL_FROM,
     to,
     subject,
