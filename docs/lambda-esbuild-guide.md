@@ -42,6 +42,121 @@ esbuild src/lambda.ts --bundle --platform=node --outfile=dist/lambda.js --target
 
 AWS Lambda の Node.js ランタイム（ベースイメージ `public.ecr.aws/lambda/nodejs:22`）には AWS SDK v3 がプリインストールされている。そのため `@aws-sdk/*` をバンドルに含める必要がなく、除外することでファイルサイズを削減できる。
 
+### esbuild は型チェックをしない
+
+esbuild は TypeScript の型アノテーションを**単純に削除**して JavaScript に変換するだけで、型の整合性は一切検証しない。これが esbuild の高速さの理由の一つだが、型エラーがあってもビルドが成功してしまうという注意点がある。
+
+#### 他のビルドツールとの比較
+
+| ツール | 型チェック | 仕組み |
+|---|---|---|
+| **esbuild** | しない | 型を削除するだけ。高速だが型エラーを検出できない |
+| **tsc**（TypeScript コンパイラ） | する | `npx tsc --noEmit` で型チェックのみ実行可能 |
+| **Vite** | しない（ビルド時） | 内部で esbuild を使って TypeScript を変換している |
+| **Next.js** | する（ビルド時） | `next build` 時に内部で `tsc` を実行している |
+
+#### Vite のプロジェクトでの型チェック
+
+Vite 自体は型チェックをしないが、`npm create vite@latest` で作成されるプロジェクトの `package.json` には以下のような build スクリプトが生成される：
+
+```json
+"build": "tsc -b && vite build"
+```
+
+これは 2 つのコマンドを `&&` で繋いでいる：
+
+1. **`tsc -b`**: TypeScript コンパイラで型チェックを行う（`-b` はプロジェクト参照を使ったビルドモード）
+2. **`vite build`**: Vite（内部で esbuild）がバンドルを行う
+
+`&&` は「前のコマンドが成功した場合のみ次を実行する」という意味なので、`tsc -b` で型エラーが見つかると `vite build` は実行されない。つまり Vite のテンプレートは**型チェックは tsc に任せ、バンドルは esbuild（Vite 経由）に任せる**という役割分担をしている。
+
+このプロジェクトのフロントエンド（`frontend/package.json`）も同じ構成：
+
+```json
+"build": "tsc -b && vite build"
+```
+
+#### バックエンド（esbuild 単体）での型チェック
+
+バックエンドの `build:lambda` スクリプトは esbuild を直接使っているため、型チェックが含まれていない：
+
+```json
+"build:lambda": "esbuild src/lambda.ts --bundle --platform=node --outfile=dist/lambda.js --target=node22 --external:@aws-sdk/*"
+```
+
+そのため、CI/CD パイプライン（`.github/workflows/deploy-backend-lambda.yml`）でビルド前に `npx tsc --noEmit` を実行して型チェックを行っている。`--noEmit` は「型チェックだけ行い JavaScript ファイルは出力しない」というフラグで、JavaScript の出力は esbuild に任せる。
+
+```yaml
+# .github/workflows/deploy-backend-lambda.yml から抜粋
+- name: Type check
+  working-directory: backend
+  run: npx tsc --noEmit
+
+- name: Build and push image
+  run: docker build ...
+```
+
+#### tsc -b と tsc --noEmit の違い
+
+Vite プロジェクトの `tsc -b` と CI の `npx tsc --noEmit` はどちらも型チェックを行うが、オプションの意味が異なる。
+
+- **`-b`（`--build`）**: プロジェクト参照（`tsconfig.json` の `references`）を考慮したビルドモード。型チェック**と** JavaScript ファイルの出力を行う。ただし Vite テンプレートの `tsconfig.json` では `noEmit: true` が設定されているため、結果的に型チェックのみになっている。
+- **`--noEmit`**: 型チェックだけ行い、JavaScript ファイルを一切出力しないという明示的な指定。
+
+| | `tsc -b` | `tsc --noEmit` |
+|---|---|---|
+| 型チェック | する | する |
+| JS 出力 | する（`noEmit: true` が tsconfig にあれば出力しない） | しない（フラグで明示的に抑制） |
+| プロジェクト参照 | 対応 | 非対応 |
+| 用途 | 複数 tsconfig がある場合（Vite テンプレートは `tsconfig.app.json` と `tsconfig.node.json` に分かれている） | 単一 tsconfig のプロジェクトでシンプルに型チェックしたい場合 |
+
+バックエンドは `tsconfig.json` が 1 つだけなので `tsc --noEmit` で十分。
+
+#### npx の役割
+
+Vite プロジェクトの build スクリプトには `npx` がないが、CI の型チェックには `npx tsc --noEmit` と書いている。この違いは**実行場所**による。
+
+`npx` はパッケージを探して実行するコマンド。`npm run` 経由（`package.json` の scripts 内）では npm が自動的に `node_modules/.bin/` を `PATH` に追加するため、`tsc` とだけ書けば見つかる。一方、GitHub Actions の `run` はただのシェルコマンドなので `node_modules/.bin/` が `PATH` に含まれておらず、`npx` で探す必要がある。
+
+| 実行場所 | `node_modules/.bin/` への PATH | `npx` |
+|---|---|---|
+| `npm run` 内（package.json の scripts） | 自動で通る | 不要 |
+| シェルから直接（CI の `run` など） | 通らない | 必要 |
+
+#### PATH（パスが通る）とは
+
+シェルで `tsc` と入力すると、OS は `PATH` 環境変数に登録されたディレクトリを順番に探し、`tsc` という実行ファイルが見つかったらそれを実行する。見つからなければ `command not found` になる。
+
+```bash
+# PATH の中身（コロン区切りでディレクトリが並んでいる）
+echo $PATH
+# /usr/local/bin:/usr/bin:/bin:...
+```
+
+「パスが通る」= `PATH` にそのコマンドがあるディレクトリが含まれている、という意味。
+
+```
+通常のシェル:
+  PATH = /usr/local/bin:/usr/bin:/bin
+  → tsc が見つからない（command not found）
+
+npm run 経由:
+  PATH = ./node_modules/.bin:/usr/local/bin:/usr/bin:/bin
+  → node_modules/.bin/tsc が見つかる
+```
+
+`npm install` でパッケージをインストールすると、そのパッケージの CLI コマンドが `node_modules/.bin/` にシンボリックリンク（ファイルのショートカット）として配置される。シンボリックリンクはファイルのコピーではなく参照で、実行すると OS が自動的にリンク先の実体ファイルを実行する。
+
+```
+node_modules/.bin/
+├── tsc       → ../typescript/bin/tsc      （実体へのリンク）
+├── esbuild   → ../esbuild/bin/esbuild
+├── tsx       → ../tsx/dist/cli.mjs
+└── vite      → ../vite/bin/vite.js
+```
+
+こうすることで `node_modules/.bin/` だけ見れば、インストール済みのすべてのコマンドが揃っている状態になる。
+
 ---
 
 ## 2. Lambda ハンドラーとは
