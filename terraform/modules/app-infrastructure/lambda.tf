@@ -202,6 +202,34 @@ resource "aws_lambda_function" "daily_report" {
 }
 
 # ==============================================================================
+# サブスクリプションフィルターエラー通知 Lambda
+# ==============================================================================
+resource "aws_lambda_function" "notification_function" {
+  function_name = "${var.project_name}-notifications-email"
+  role          = module.notification_lambda_role.arn
+
+  runtime          = "python3.11"
+  handler          = "lambda_function.lambda_handler"
+  filename         = data.archive_file.lambda_zip.output_path
+  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
+
+  timeout     = 30
+  memory_size = 128
+
+  environment {
+    variables = {
+      PROJECT_NAME     = var.project_name
+      APP_ENV          = var.app_env
+      ALERT_EMAIL_TO   = var.alert_email_to
+      ALERT_EMAIL_FROM = "noreply@${var.sub_frontend_domain_name}.${var.domain_name}",
+    }
+  }
+  lifecycle {
+    ignore_changes = [filename, source_code_hash]
+  }
+}
+
+# ==============================================================================
 # Lambda パーミッション
 # ==============================================================================
 
@@ -222,3 +250,13 @@ resource "aws_lambda_permission" "eventbridge_daily_report" {
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.daily_report.arn
 }
+
+# LambdaがCloudWatch Logsから呼び出せるようにする
+resource "aws_lambda_permission" "allow_cloudwatch_logs_invoke" {
+  statement_id  = "AllowExecutionFromCloudWatchLogs"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.notification_function.function_name
+  principal     = "logs.ap-northeast-1.amazonaws.com"
+  source_arn    = "${aws_cloudwatch_log_group.lambda_api_log.arn}:*"
+}
+

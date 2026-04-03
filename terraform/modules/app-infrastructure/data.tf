@@ -47,3 +47,9 @@ data "archive_file" "lambda_zip" {
   source_file = local_file.lambda_py.filename
   output_path = "${path.module}/.tmp/lambda.zip"
 }
+
+# --- ECR リポジトリ参照 ---
+# ECR リポジトリは別途作成済みの前提。イメージは GitHub Actions でプッシュする。
+data "aws_ecr_repository" "backend" {
+  name = var.ecr_repository_name
+}

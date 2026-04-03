@@ -42,13 +42,6 @@ module "vpc" {
   }
 }
 
-locals {
-  public_subnet_a_id  = module.vpc.public_subnets[0]
-  public_subnet_c_id  = module.vpc.public_subnets[1]
-  private_subnet_a_id = module.vpc.private_subnets[0]
-  private_subnet_c_id = module.vpc.private_subnets[1]
-}
-
 resource "aws_vpc_endpoint" "s3_gateway" {
   vpc_id            = module.vpc.vpc_id
   service_name      = "com.amazonaws.ap-northeast-1.s3"
