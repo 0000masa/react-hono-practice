@@ -50,6 +50,11 @@ resource "aws_iam_policy" "ses_send_policy" {
 }
 
 # SQS アクセス
+# Lambda サービスの内部コンポーネント（ポーラー）が SQS をポーリングする際、
+# Lambda 関数の実行ロールの権限を借りて SQS にアクセスする。
+# そのため、ReceiveMessage（メッセージ取得）、DeleteMessage（処理成功後の削除）、
+# GetQueueAttributes（キューの状態確認）などの権限をここで付与する必要がある。
+# SendMessage は API Lambda がキューにメッセージを送信するために必要。
 resource "aws_iam_policy" "sqs_queue_policy" {
   name        = "${var.project_name}-sqs-queue-policy"
   description = "Allow Lambda to send/receive messages from SQS queue"

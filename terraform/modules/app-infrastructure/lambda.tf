@@ -107,6 +107,13 @@ resource "aws_lambda_function" "sqs_worker" {
 }
 
 # SQS → Lambda イベントソースマッピング
+# この設定により、Lambda サービスの内部コンポーネント（Event Source Mapping ポーラー）が
+# SQS キューに対して自動的に Long Polling を行い、メッセージを検出すると Lambda を起動する。
+# ポーリングは AWS がマネージドで運用するため、利用者側でコンピュートリソースを用意する必要はない。
+# ポーリング時の SQS API コール（ReceiveMessage）は lambda_execution_role の権限で実行される。
+# メッセージがない間は Lambda 関数は起動されないため、関数の実行課金は発生しない。
+# 処理成功時はメッセージが自動削除され、失敗時は visibility_timeout 後にリトライされる。
+# なお、Lambda の timeout（60s）は SQS の visibility_timeout（90s）より短くする必要がある。
 resource "aws_lambda_event_source_mapping" "qrcode_worker" {
   event_source_arn = aws_sqs_queue.qrcode_generation.arn
   function_name    = aws_lambda_function.sqs_worker.arn
@@ -260,3 +267,9 @@ resource "aws_lambda_permission" "allow_cloudwatch_logs_invoke" {
   source_arn    = "${aws_cloudwatch_log_group.lambda_api_log.arn}:*"
 }
 
+# SQS → Lambda の aws_lambda_permission は不要。
+# SQS はプッシュ型（API Gateway / EventBridge / CloudWatch Logs のように Lambda を直接呼び出す）ではなく、
+# Lambda サービスの内部コンポーネント（ポーラー）が SQS をポーリングして Lambda を起動するポーリング型のため、
+# 外部サービスに Lambda の呼び出しを許可するリソースベースポリシー（aws_lambda_permission）は必要ない。
+# 代わりに、ポーラーが SQS にアクセスするための IAM ポリシー（sqs:ReceiveMessage 等）を
+# Lambda の実行ロールに付与する必要がある（iam_policy.tf の sqs_queue_policy を参照）。
