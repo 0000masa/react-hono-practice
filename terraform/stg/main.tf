@@ -10,6 +10,8 @@ module "app" {
   enable_nat_gateway       = var.enable_nat_gateway
   alert_email_to           = var.alert_email_to
   app_env                  = var.app_env
+  ecr_repository_name      = var.ecr_repository_name
+  image_tag                = var.image_tag
 
   providers = {
     aws           = aws

@@ -2,17 +2,14 @@
 # Lambda 関数（API / SQSワーカー / マイグレーション / 日次レポート）
 # ==============================================================================
 
-# --- 初回デプロイ用ダミー ZIP ---
-# Terraform 初回 apply 時に Lambda 関数を作成するためのダミーファイル
-# 実際のコードは GitHub Actions で aws lambda update-function-code を使ってデプロイ
-data "archive_file" "lambda_dummy" {
-  type        = "zip"
-  output_path = "${path.module}/.tmp/lambda_dummy.zip"
+# --- ECR リポジトリ参照 ---
+# ECR リポジトリは別途作成済みの前提。イメージは GitHub Actions でプッシュする。
+data "aws_ecr_repository" "backend" {
+  name = var.ecr_repository_name
+}
 
-  source {
-    content  = "exports.handler = async () => ({ statusCode: 200, body: 'placeholder' });"
-    filename = "lambda.js"
-  }
+locals {
+  lambda_image_uri = "${data.aws_ecr_repository.backend.repository_url}:${var.image_tag}"
 }
 
 # ==============================================================================
@@ -22,13 +19,14 @@ data "archive_file" "lambda_dummy" {
 resource "aws_lambda_function" "api" {
   function_name = "${var.project_name}-api"
   role          = module.lambda_execution_role.arn
-  runtime       = "nodejs20.x"
-  handler       = "lambda.handler"
+  package_type  = "Image"
+  image_uri     = local.lambda_image_uri
   memory_size   = 1024
   timeout       = 29 # API Gateway の最大タイムアウトは 30 秒
 
-  filename         = data.archive_file.lambda_dummy.output_path
-  source_code_hash = data.archive_file.lambda_dummy.output_base64sha256
+  image_config {
+    command = ["lambda.handler"]
+  }
 
   vpc_config {
     subnet_ids         = [local.private_subnet_a_id, local.private_subnet_c_id]
@@ -55,7 +53,7 @@ resource "aws_lambda_function" "api" {
   }
 
   lifecycle {
-    ignore_changes = [filename, source_code_hash]
+    ignore_changes = [image_uri]
   }
 
   tags = {
@@ -70,13 +68,14 @@ resource "aws_lambda_function" "api" {
 resource "aws_lambda_function" "sqs_worker" {
   function_name = "${var.project_name}-sqs-worker"
   role          = module.lambda_execution_role.arn
-  runtime       = "nodejs20.x"
-  handler       = "sqs-handler.handler"
+  package_type  = "Image"
+  image_uri     = local.lambda_image_uri
   memory_size   = 1024
   timeout       = 60 # SQS visibility_timeout (90s) より短くする
 
-  filename         = data.archive_file.lambda_dummy.output_path
-  source_code_hash = data.archive_file.lambda_dummy.output_base64sha256
+  image_config {
+    command = ["sqs-handler.handler"]
+  }
 
   vpc_config {
     subnet_ids         = [local.private_subnet_a_id, local.private_subnet_c_id]
@@ -99,7 +98,7 @@ resource "aws_lambda_function" "sqs_worker" {
   }
 
   lifecycle {
-    ignore_changes = [filename, source_code_hash]
+    ignore_changes = [image_uri]
   }
 
   tags = {
@@ -122,13 +121,14 @@ resource "aws_lambda_event_source_mapping" "qrcode_worker" {
 resource "aws_lambda_function" "migration" {
   function_name = "${var.project_name}-migration"
   role          = module.lambda_execution_role.arn
-  runtime       = "nodejs20.x"
-  handler       = "migrate.handler"
+  package_type  = "Image"
+  image_uri     = local.lambda_image_uri
   memory_size   = 512
   timeout       = 900 # 最大 15 分
 
-  filename         = data.archive_file.lambda_dummy.output_path
-  source_code_hash = data.archive_file.lambda_dummy.output_base64sha256
+  image_config {
+    command = ["migrate.handler"]
+  }
 
   vpc_config {
     subnet_ids         = [local.private_subnet_a_id, local.private_subnet_c_id]
@@ -148,7 +148,7 @@ resource "aws_lambda_function" "migration" {
   }
 
   lifecycle {
-    ignore_changes = [filename, source_code_hash]
+    ignore_changes = [image_uri]
   }
 
   tags = {
@@ -163,13 +163,14 @@ resource "aws_lambda_function" "migration" {
 resource "aws_lambda_function" "daily_report" {
   function_name = "${var.project_name}-daily-report"
   role          = module.lambda_execution_role.arn
-  runtime       = "nodejs20.x"
-  handler       = "daily-report.handler"
+  package_type  = "Image"
+  image_uri     = local.lambda_image_uri
   memory_size   = 512
   timeout       = 300
 
-  filename         = data.archive_file.lambda_dummy.output_path
-  source_code_hash = data.archive_file.lambda_dummy.output_base64sha256
+  image_config {
+    command = ["daily-report.handler"]
+  }
 
   vpc_config {
     subnet_ids         = [local.private_subnet_a_id, local.private_subnet_c_id]
@@ -192,7 +193,7 @@ resource "aws_lambda_function" "daily_report" {
   }
 
   lifecycle {
-    ignore_changes = [filename, source_code_hash]
+    ignore_changes = [image_uri]
   }
 
   tags = {

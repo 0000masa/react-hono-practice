@@ -44,3 +44,13 @@ variable "app_env" {
   type        = string
   default     = "staging"
 }
+
+variable "ecr_repository_name" {
+  description = "ECR リポジトリ名"
+  type        = string
+}
+
+variable "image_tag" {
+  description = "ECR イメージタグ"
+  type        = string
+}
