@@ -1,4 +1,4 @@
-project_name             = "kum"
+project_name             = "kum-stg"
 domain_name              = "favoritemyanime.com"
 sub_frontend_domain_name = "www"
 db_name                  = "kum_db"

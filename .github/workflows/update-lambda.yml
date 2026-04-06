@@ -1,0 +1,114 @@
+# Lambda 関数のイメージ URI を更新するワークフロー
+# ECR にプッシュ済みのイメージタグを指定して、4 つの Lambda 関数を一括更新する
+# deploy-backend-lambda.yml（ECR プッシュ）の後に実行する想定
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: "デプロイ先環境"
+        type: choice
+        options:
+          - stg
+          - prod
+        required: true
+        default: stg
+
+      image_tag:
+        description: "ECR イメージタグ（例: sha-abc123def456...）"
+        type: string
+        required: true
+
+env:
+  AWS_REGION: ap-northeast-1
+  ECR_REPOSITORY: react-hono-practice-backend-lambda
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  update-lambda:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target_env }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # prod は main ブランチでのみ実行可能
+      # stg は main または develop ブランチで実行可能
+      - name: Fail on forbidden branch
+        if: |
+          !(
+            (inputs.target_env == 'prod' && github.ref == 'refs/heads/main') ||
+            (inputs.target_env == 'stg'  && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'))
+          )
+        run: |
+          echo "::error::このブランチでは ${{ inputs.target_env }} 環境へのデプロイはできません。"
+          exit 1
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # ECR にログインしてレジストリ URL を取得
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # 環境ごとの project_name を設定
+      # stg → kum-stg, prod → kum-prod
+      - name: Resolve project name
+        run: |
+          if [ "${{ inputs.target_env }}" = "prod" ]; then
+            echo "PROJECT_NAME=kum-prod" >> $GITHUB_ENV
+          else
+            echo "PROJECT_NAME=kum-stg" >> $GITHUB_ENV
+          fi
+
+      # ECR イメージ URI を構築
+      - name: Set image URI
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          echo "IMAGE_URI=$ECR_REGISTRY/$ECR_REPOSITORY:${{ inputs.image_tag }}" >> $GITHUB_ENV
+
+      # 4 つの Lambda 関数のイメージを更新
+      - name: Update Lambda functions
+        run: |
+          FUNCTIONS=(
+            "${{ env.PROJECT_NAME }}-api"
+            "${{ env.PROJECT_NAME }}-sqs-worker"
+            "${{ env.PROJECT_NAME }}-migration"
+            "${{ env.PROJECT_NAME }}-daily-report"
+          )
+
+          for FUNC_NAME in "${FUNCTIONS[@]}"; do
+            echo "Updating $FUNC_NAME..."
+            aws lambda update-function-code \
+              --function-name "$FUNC_NAME" \
+              --image-uri "${{ env.IMAGE_URI }}" \
+              --no-cli-pager
+          done
+
+      # 全 Lambda の更新完了を待つ
+      # update-function-code は非同期で更新を開始するため、
+      # wait で LastUpdateStatus が Successful になるまで待機する
+      - name: Wait for updates to complete
+        run: |
+          FUNCTIONS=(
+            "${{ env.PROJECT_NAME }}-api"
+            "${{ env.PROJECT_NAME }}-sqs-worker"
+            "${{ env.PROJECT_NAME }}-migration"
+            "${{ env.PROJECT_NAME }}-daily-report"
+          )
+
+          for FUNC_NAME in "${FUNCTIONS[@]}"; do
+            echo "Waiting for $FUNC_NAME..."
+            aws lambda wait function-updated \
+              --function-name "$FUNC_NAME"
+            echo "$FUNC_NAME updated successfully."
+          done
