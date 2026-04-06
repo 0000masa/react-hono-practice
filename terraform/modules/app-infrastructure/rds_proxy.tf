@@ -29,9 +29,11 @@ resource "aws_db_proxy" "main" {
   #   Proxy  → RDS  : auth_scheme = "SECRETS" により Secrets Manager から DB パスワードを取得して認証
   # secret_arn には secrets_manager.tf で定義した DB 認証情報のシークレットを指定する。
   auth {
-    iam_auth    = "REQUIRED"
-    auth_scheme = "SECRETS"
-    secret_arn  = aws_secretsmanager_secret.rds_credentials.arn
+    iam_auth                    = "REQUIRED"
+    auth_scheme                 = "SECRETS"
+    secret_arn                  = aws_secretsmanager_secret.rds_credentials.arn
+    # MariaDB は MYSQL_NATIVE_PASSWORD のみサポート（デフォルトの MYSQL_CLEAR_PASSWORD は非対応）
+    client_password_auth_type   = "MYSQL_NATIVE_PASSWORD"
   }
 
   tags = {
