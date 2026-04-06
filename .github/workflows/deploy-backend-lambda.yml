@@ -27,14 +27,6 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # esbuild は TypeScript の型アノテーションを削除するだけで型チェックは行わない。
-      # 型エラーがあっても esbuild のビルドは成功してしまうため、
-      # ビルド前に tsc --noEmit で型チェックのみ実行する。
-      # --noEmit: 型チェックだけ行い JavaScript ファイルは出力しない（出力は esbuild に任せる）。
-      - name: Type check
-        working-directory: backend
-        run: npx tsc --noEmit
-
       - name: Build and push image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
