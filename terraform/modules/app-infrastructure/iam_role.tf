@@ -55,6 +55,31 @@ module "eventbridge_role" {
 }
 
 # ==============================================================================
+# RDS Proxy 用 IAM ロール
+# ==============================================================================
+
+module "rds_proxy_role" {
+  source = "terraform-aws-modules/iam/aws//modules/iam-role"
+
+  name            = "${var.project_name}-rds-proxy-role"
+  use_name_prefix = false
+
+  trust_policy_permissions = {
+    rds = {
+      actions = ["sts:AssumeRole"]
+      principals = [{
+        type        = "Service"
+        identifiers = ["rds.amazonaws.com"]
+      }]
+    }
+  }
+
+  policies = {
+    RdsProxySecrets = aws_iam_policy.rds_proxy_secrets.arn
+  }
+}
+
+# ==============================================================================
 # 通知 Lambda 用 IAM ロール（既存の通知Lambda用、変更なし）
 # ==============================================================================
 

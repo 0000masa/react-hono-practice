@@ -104,6 +104,9 @@ resource "aws_iam_policy" "lambda_ssm_policy" {
 }
 
 # RDS Proxy IAM 認証
+# Lambda が RDS Proxy に IAM 認証で接続するための権限。
+# 通常の DB 接続はユーザー名とパスワードを使うが、IAM 認証では AWS の認証情報（IAM ロール）で接続する。
+# パスワードをコードや環境変数に保存する必要がなくなるため、セキュリティ上のメリットがある。
 resource "aws_iam_policy" "lambda_rds_proxy_policy" {
   name        = "${var.project_name}-lambda-rds-proxy-policy"
   description = "Allow Lambda to connect to RDS Proxy via IAM auth"
@@ -113,7 +116,12 @@ resource "aws_iam_policy" "lambda_rds_proxy_policy" {
     Statement = [
       {
         Effect = "Allow"
+        # rds-db:connect: RDS Proxy に IAM 認証で接続することを許可するアクション
         Action = "rds-db:connect"
+        # Resource の ARN は「どの RDS Proxy に、どの DB ユーザーとして接続できるか」を指定する。
+        # 形式: arn:aws:rds-db:{リージョン}:{AWSアカウントID}:dbuser:{RDS ProxyのID}/{DBユーザー名}
+        # 例: arn:aws:rds-db:ap-northeast-1:123456789012:dbuser:prx-0abcdef123456/admin
+        # これにより、この特定の RDS Proxy に指定した DB ユーザーとしてのみ接続できる最小権限に絞られる。
         Resource = "arn:aws:rds-db:ap-northeast-1:${data.aws_caller_identity.current.account_id}:dbuser:${aws_db_proxy.main.id}/${var.db_username}"
       }
     ]
@@ -133,6 +141,26 @@ resource "aws_iam_policy" "eventbridge_lambda_invoke" {
         Effect = "Allow"
         Action = "lambda:InvokeFunction"
         Resource = aws_lambda_function.daily_report.arn
+      }
+    ]
+  })
+}
+
+# RDS Proxy 用: Secrets Manager 読み取り
+resource "aws_iam_policy" "rds_proxy_secrets" {
+  name        = "${var.project_name}-rds-proxy-secrets"
+  description = "Allow RDS Proxy to read secrets from Secrets Manager"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret"
+        ]
+        Resource = aws_secretsmanager_secret.rds_credentials.arn
       }
     ]
   })
