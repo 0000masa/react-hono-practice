@@ -44,6 +44,29 @@ GitHub Actions → Lambda (マイグレーション) → RDS Proxy → RDS
 
 Lambda は呼び出しごとに新しい実行環境が起動する可能性がある。直接 RDS に接続すると、同時接続数がスパイクして `Too many connections` エラーが発生する。RDS Proxy はコネクションプールを管理し、Lambda のスケーリングに伴う接続数の急増を吸収する。
 
+### RDS Proxy が解決するのは「接続の効率化」
+
+RDS Proxy は DB の同時接続数を増やすのではなく、**接続の使い方を効率化（多重化 / multiplexing）**する。
+
+**Proxy なしの場合:**
+
+```
+Lambda が100個同時起動 → 100本の DB 接続が張られる
+各 Lambda の実行中、SQL を実行していない待ち時間でも接続を占有し続ける
+→ RDS の max_connections（例: 150）をすぐに使い切る
+```
+
+**Proxy ありの場合:**
+
+```
+Lambda が100個同時起動 → Proxy が100本のクライアント接続を受ける
+Proxy は内部で少数の DB 接続を使い回す（多重化）
+ある Lambda が SQL を実行していない間、その DB 接続を別の Lambda に割り当てる
+→ クライアント100本に対して実際の DB 接続は数十本で済む
+```
+
+つまり「クライアント接続数 > 実際の DB 接続数」を実現することで、RDS の `max_connections` の範囲内でより多くの Lambda を捌ける。極端に大量のリクエストが来た場合は、最終的には RDS 側の接続上限がボトルネックになる。
+
 ### 認証パターン
 
 Lambda → RDS Proxy → RDS の接続方法には2つのパターンがある。
