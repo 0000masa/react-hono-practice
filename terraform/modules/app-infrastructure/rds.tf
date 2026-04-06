@@ -1,8 +1,11 @@
 # RDS本体
 resource "aws_db_instance" "main" {
   identifier     = "${var.project_name}-db"
-  engine         = "mariadb"
-  engine_version = "11.4" # ←ここを11.4系に固定
+  # MariaDB 11.x は RDS Proxy がサポートする認証方式（mysql_native_password）に
+  # 対応しておらず、RDS Proxy のターゲット登録時にエラーになるため MySQL に変更。
+  # RDS Proxy がサポートする MariaDB は 10.3〜10.6 のみ。
+  engine         = "mysql"
+  engine_version = "8.4"
   instance_class = "db.t4g.micro"
   # instance_class                  = "db.t4g.medium"
   allocated_storage               = 20

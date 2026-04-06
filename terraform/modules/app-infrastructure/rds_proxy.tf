@@ -32,8 +32,6 @@ resource "aws_db_proxy" "main" {
     iam_auth                    = "REQUIRED"
     auth_scheme                 = "SECRETS"
     secret_arn                  = aws_secretsmanager_secret.rds_credentials.arn
-    # MariaDB は MYSQL_NATIVE_PASSWORD のみサポート（デフォルトの MYSQL_CLEAR_PASSWORD は非対応）
-    client_password_auth_type   = "MYSQL_NATIVE_PASSWORD"
   }
 
   tags = {
