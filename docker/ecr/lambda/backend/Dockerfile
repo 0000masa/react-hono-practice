@@ -15,5 +15,11 @@ FROM public.ecr.aws/lambda/nodejs:22
 # LAMBDA_TASK_ROOT は AWS Lambda ベースイメージに定義済みの環境変数（値は /var/task）
 # Lambda ランタイムはこのディレクトリからハンドラーコードを読み込む
 COPY --from=builder /build/dist/lambda.js ${LAMBDA_TASK_ROOT}/lambda.js
+COPY --from=builder /build/dist/sqs-handler.js ${LAMBDA_TASK_ROOT}/sqs-handler.js
+COPY --from=builder /build/dist/migrate.js ${LAMBDA_TASK_ROOT}/migrate.js
+COPY --from=builder /build/dist/daily-report.js ${LAMBDA_TASK_ROOT}/daily-report.js
+
+# マイグレーション SQL ファイル（migrate.ts が参照する）
+COPY --from=builder /build/src/db/migrations/ ${LAMBDA_TASK_ROOT}/db/migrations/
 
 CMD ["lambda.handler"]

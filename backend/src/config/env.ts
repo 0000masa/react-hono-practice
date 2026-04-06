@@ -43,6 +43,9 @@ export const env = {
   SMTP_SECURE: getEnv('SMTP_SECURE', 'false') === 'true',
   MAIL_FROM: getEnv('MAIL_FROM', 'noreply@example.com'),
 
+  SQS_QUEUE_URL: getEnv('SQS_QUEUE_URL', ''),
+  ALERT_EMAIL_TO: getEnv('ALERT_EMAIL_TO', ''),
+
   get isProduction() {
     return this.NODE_ENV === 'production';
   },

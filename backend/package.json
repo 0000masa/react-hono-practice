@@ -4,12 +4,13 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc --noEmit && esbuild src/index.ts --bundle --platform=node --outfile=dist/index.js --packages=external",
-    "build:lambda": "tsc --noEmit && esbuild src/lambda.ts --bundle --platform=node --outfile=dist/lambda.js --target=node22 --external:@aws-sdk/*",
+    "build:lambda": "tsc --noEmit && esbuild src/lambda.ts src/sqs-handler.ts src/migrate.ts src/daily-report.ts --bundle --platform=node --outdir=dist --target=node22 --external:@aws-sdk/*",
     "start": "node dist/index.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1012.0",
     "@aws-sdk/client-ses": "^3.1012.0",
+    "@aws-sdk/client-sqs": "^3.1024.0",
     "@aws-sdk/rds-signer": "^3.1012.0",
     "@hono/node-server": "^1.19.11",
     "@hono/zod-validator": "^0.7.6",

@@ -1,10 +1,14 @@
 import type { Context } from 'hono';
 import { desc, count, eq } from 'drizzle-orm';
+import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { db } from '../config/database';
 import { qrCodes, users } from '../db/schema';
 import { generateAndUpload } from '../services/qrcode.service';
 import { getFileUrl } from '../services/storage.service';
+import { env } from '../config/env';
 import type { Env, PaginationMeta } from '../types/index';
+
+const sqsClient = env.SQS_QUEUE_URL ? new SQSClient({}) : null;
 
 const PER_PAGE = 50;
 
@@ -148,22 +152,35 @@ export async function storeAsync(c: Context<Env>) {
     status: 'pending',
   }).$returningId();
 
-  // Async stub: run synchronously for now
-  (async () => {
-    try {
-      const fileName = await generateAndUpload(body.data!, user.id);
-      await db
-        .update(qrCodes)
-        .set({ fileName, status: 'completed' })
-        .where(eq(qrCodes.id, result.id));
-    } catch (error) {
-      console.error('Async QR code generation error:', error);
-      await db
-        .update(qrCodes)
-        .set({ status: 'failed' })
-        .where(eq(qrCodes.id, result.id));
-    }
-  })();
+  if (sqsClient && env.SQS_QUEUE_URL) {
+    await sqsClient.send(
+      new SendMessageCommand({
+        QueueUrl: env.SQS_QUEUE_URL,
+        MessageBody: JSON.stringify({
+          qrCodeId: result.id,
+          data: body.data!,
+          userId: user.id,
+        }),
+      }),
+    );
+  } else {
+    // ローカル開発: SQS なしで直接処理
+    (async () => {
+      try {
+        const fileName = await generateAndUpload(body.data!, user.id);
+        await db
+          .update(qrCodes)
+          .set({ fileName, status: 'completed' })
+          .where(eq(qrCodes.id, result.id));
+      } catch (error) {
+        console.error('Async QR code generation error:', error);
+        await db
+          .update(qrCodes)
+          .set({ status: 'failed' })
+          .where(eq(qrCodes.id, result.id));
+      }
+    })();
+  }
 
   return c.json(
     {
