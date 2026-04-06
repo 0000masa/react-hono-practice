@@ -179,6 +179,65 @@ export const db = drizzle(pool, { schema, mode: 'default' })
 
 drizzle を使う側のコード（クエリ部分）はほぼ同じ。違いは接続部分だけなので `database.ts` に差が集約されている。
 
+## Lambda + RDS Proxy での TLS（SSL）接続
+
+### 2 区間の TLS
+
+Lambda から RDS Proxy 経由で RDS に接続する場合、TLS 通信は 2 区間に分かれる。
+
+```
+Lambda ──TLS①──→ RDS Proxy ──TLS②──→ RDS
+```
+
+| 区間 | 制御方法 | 証明書 |
+|---|---|---|
+| Lambda → RDS Proxy | Terraform の `require_tls = true` で強制。Lambda 側は `ssl: { rejectUnauthorized: true }` で検証 | **Amazon Trust Services** のパブリック CA が発行 |
+| RDS Proxy → RDS | RDS Proxy が内部的に自動で TLS 接続する。ユーザー側の設定は不要 | RDS Proxy が内部的に検証（AWS が管理） |
+
+Lambda が気にするのは RDS Proxy までの TLS だけ。Proxy から先は AWS が面倒を見てくれる。
+
+### Dockerfile に CA 証明書のインストールは不要
+
+RDS Proxy の証明書は **Amazon Trust Services** のパブリック CA が発行している。
+この CA は Node.js にデフォルトで含まれている **Mozilla CA バンドル** に入っているため、
+Lambda の Docker イメージに追加の証明書をインストールする必要はない。
+
+```typescript
+// database.ts（IAM 認証時）
+pool = mysql.createPool({
+  host: env.DATABASE_HOST,
+  ssl: { rejectUnauthorized: true }, // ← 追加の CA 証明書なしで動作する
+  // ...
+});
+```
+
+### RDS に直接 TLS 接続する場合との違い
+
+RDS Proxy を経由せず RDS に直接 TLS 接続する場合は事情が異なる。
+
+| 接続先 | 証明書の発行元 | Node.js デフォルトの CA バンドルに含まれるか |
+|---|---|---|
+| RDS Proxy | Amazon Trust Services（パブリック CA） | 含まれる → 追加インストール不要 |
+| RDS（直接） | Amazon RDS 専用 CA（`rds-ca-rsa2048-g1` 等） | **含まれない** → CA 証明書のダウンロードと設定が必要 |
+
+RDS に直接 TLS 接続する場合は、Amazon RDS の CA 証明書バンドルをダウンロードして
+Dockerfile に組み込み、`ssl.ca` オプションで指定する必要がある。
+
+```typescript
+// RDS 直接接続の場合（参考）
+import fs from 'node:fs';
+
+pool = mysql.createPool({
+  host: 'rds-instance.xxxx.ap-northeast-1.rds.amazonaws.com',
+  ssl: {
+    rejectUnauthorized: true,
+    ca: fs.readFileSync('/path/to/amazon-rds-ca-bundle.pem'), // ← 必要
+  },
+});
+```
+
+このプロジェクトでは RDS Proxy 経由で接続しているため、上記の対応は不要。
+
 ### connectionString とは
 
 接続情報を1つの URL 文字列にまとめたもの。環境変数 `DATABASE_URL` として設定されることが多い。
