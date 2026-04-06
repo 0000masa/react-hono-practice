@@ -5,7 +5,7 @@ on:
 
 env:
   AWS_REGION: ap-northeast-1
-  ECR_REPOSITORY: hono-backend-lambda
+  ECR_REPOSITORY: react-hono-practice-backend-lambda
   IMAGE_TAG: sha-${{ github.sha }}
 
 permissions:
