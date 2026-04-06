@@ -166,6 +166,38 @@ resource "aws_iam_policy" "rds_proxy_secrets" {
   })
 }
 
+# Secrets Manager ローテーション Lambda 用ポリシー
+# ローテーション Lambda が以下の操作を行うために必要:
+# - Secrets Manager のシークレット値の読み書き（パスワード更新）
+# - RDS のパスワード変更（ローテーション対象の DB に接続して ALTER USER を実行するため不要。
+#   Lambda は DB に直接接続して SQL でパスワードを変更する。そのため RDS API 権限ではなく、
+#   Secrets Manager の権限と DB への MySQL 接続（SG で制御）が必要）
+resource "aws_iam_policy" "rotation_lambda_policy" {
+  name        = "${var.project_name}-rotation-lambda-policy"
+  description = "Allow rotation Lambda to manage secrets and rotate RDS password"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:DescribeSecret",
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:PutSecretValue",
+          "secretsmanager:UpdateSecretVersionStage"
+        ]
+        Resource = aws_secretsmanager_secret.rds_credentials.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = "secretsmanager:GetRandomPassword"
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 # 通知 Lambda 用: CloudWatch Logs 読み取り
 resource "aws_iam_policy" "lambda_read_laravel_logs" {
   name = "${var.project_name}-lambda-read-laravel-logs"

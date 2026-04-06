@@ -195,6 +195,52 @@ resource "aws_lambda_function" "daily_report" {
 }
 
 # ==============================================================================
+# Secrets Manager ローテーション Lambda
+# RDS のパスワードを定期的に自動変更するための Lambda 関数。
+# AWS が公式に提供する SAR（Serverless Application Repository）テンプレートを使用する。
+# テンプレート名: SecretsManagerRDSMySQLRotationSingleUser
+#
+# 処理の流れ:
+#   1. Secrets Manager が スケジュール に従ってこの Lambda を呼び出す
+#   2. Lambda が新しいパスワードを生成する
+#   3. Lambda が RDS に接続して ALTER USER でパスワードを変更する
+#   4. Lambda が Secrets Manager のシークレット値を新しいパスワードに更新する
+#   5. RDS Proxy が次回接続時に新しいパスワードを自動取得する
+# ==============================================================================
+
+# SAR テンプレートからローテーション Lambda をデプロイ
+# aws_serverlessapplicationrepository_cloudformation_stack は SAR のテンプレートを
+# CloudFormation スタックとしてデプロイするリソース。
+# SAR テンプレートの中身は Lambda 関数 + 必要なパーミッションの CloudFormation テンプレート。
+resource "aws_serverlessapplicationrepository_cloudformation_stack" "rotation_lambda" {
+  name             = "${var.project_name}-rds-rotation"
+  # この ARN は AWS が SAR テンプレートを公開している固定のアカウント ID（297356227824）を含む。
+  # 自分の AWS アカウント ID ではなく、AWS 公式のテンプレート公開元のため、ハードコードが正しい。
+  application_id   = "arn:aws:serverlessrepo:us-east-1:297356227824:applications/SecretsManagerRDSMySQLRotationSingleUser"
+  semantic_version = "1.1.225"
+
+  capabilities = ["CAPABILITY_IAM", "CAPABILITY_RESOURCE_POLICY"]
+
+  parameters = {
+    endpoint            = "https://secretsmanager.${data.aws_region.current.name}.amazonaws.com"
+    functionName        = "${var.project_name}-rds-rotation"
+    vpcSubnetIds        = join(",", [local.private_subnet_a_id, local.private_subnet_c_id])
+    vpcSecurityGroupIds = aws_security_group.rotation_lambda_sg.id
+  }
+}
+
+# Secrets Manager からローテーション Lambda を呼び出すためのパーミッション
+resource "aws_lambda_permission" "secrets_manager_rotation" {
+  function_name = "${var.project_name}-rds-rotation"
+  statement_id  = "AllowSecretsManagerInvoke"
+  action        = "lambda:InvokeFunction"
+  principal     = "secretsmanager.amazonaws.com"
+  source_arn    = aws_secretsmanager_secret.rds_credentials.arn
+
+  depends_on = [aws_serverlessapplicationrepository_cloudformation_stack.rotation_lambda]
+}
+
+# ==============================================================================
 # サブスクリプションフィルターエラー通知 Lambda
 # ==============================================================================
 resource "aws_lambda_function" "notification_function" {

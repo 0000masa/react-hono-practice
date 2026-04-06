@@ -80,6 +80,33 @@ module "rds_proxy_role" {
 }
 
 # ==============================================================================
+# Secrets Manager ローテーション Lambda 用 IAM ロール
+# ==============================================================================
+
+module "rotation_lambda_role" {
+  source = "terraform-aws-modules/iam/aws//modules/iam-role"
+
+  name            = "${var.project_name}-rotation-lambda-role"
+  use_name_prefix = false
+
+  trust_policy_permissions = {
+    lambda = {
+      actions = ["sts:AssumeRole"]
+      principals = [{
+        type        = "Service"
+        identifiers = ["lambda.amazonaws.com"]
+      }]
+    }
+  }
+
+  policies = {
+    AWSLambdaBasicExecutionRole     = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+    AWSLambdaVPCAccessExecutionRole = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+    RotationPolicy                  = aws_iam_policy.rotation_lambda_policy.arn
+  }
+}
+
+# ==============================================================================
 # 通知 Lambda 用 IAM ロール（既存の通知Lambda用、変更なし）
 # ==============================================================================
 
