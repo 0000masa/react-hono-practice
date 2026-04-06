@@ -11,7 +11,7 @@ terraform {
   }
   backend "s3" {
     bucket = "github-action-terraform-tf-state-bucket" # 直接名前を書く
-    key    = "kum/stg/hono/lambda/terraform.tfstate"      # 直接パスを書く
+    key    = "practice/hono/lambda/terraform.tfstate"      # 直接パスを書く
     region = "ap-northeast-1"
     # DynamoDBの代わりにこれを使用
     use_lockfile = true
