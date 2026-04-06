@@ -99,7 +99,9 @@ resource "aws_cloudfront_distribution" "frontend_cdn" {
   # バックエンド用オリジン（API Gateway REST API）
   # CloudFront が x-api-key を付与し、API Gateway 側で検証することで直接アクセスを拒否
   origin {
-    domain_name = "${aws_api_gateway_rest_api.main.id}.execute-api.${data.aws_region.current.name}.amazonaws.com"
+    # AWS Provider v6.x で data.aws_region の name 属性が非推奨になったため id を使用（値は同じ）
+    # 例: abc1234def.execute-api.ap-northeast-1.amazonaws.com
+    domain_name = "${aws_api_gateway_rest_api.main.id}.execute-api.${data.aws_region.current.id}.amazonaws.com"
     origin_id   = "backend-api"
 
     # REST API はステージ名がURLパスに必須。origin_path でリクエストパスの先頭にステージ名を付与する。
