@@ -238,6 +238,23 @@ resource "aws_serverlessapplicationrepository_cloudformation_stack" "rotation_la
 
 **application_id の `297356227824` について:** これは自分の AWS アカウント ID ではなく、AWS が SAR テンプレートを公開している固定のアカウント ID。全 AWS ユーザー共通のため、ハードコードが正しい。
 
+**semantic_version について:** SAR テンプレートのバージョンを指定する。古いバージョン（例: `1.1.225`）は Python 3.7 ランタイムを使用しており、AWS Lambda でサポート終了済みのため `terraform apply` 時に以下のエラーが発生する：
+
+```
+The runtime parameter of python3.7 is no longer supported for creating
+or updating AWS Lambda functions.
+```
+
+Python 3.11 以降に対応したバージョン（例: `1.1.434`）を指定する必要がある。最新バージョンは [SAR の SecretsManagerRDSMySQLRotationSingleUser ページ](https://serverlessrepo.aws.amazon.com/applications/us-east-1/297356227824/SecretsManagerRDSMySQLRotationSingleUser) で確認できる。
+
+また、古いバージョンで `terraform apply` に失敗すると CloudFormation スタックが `ROLLBACK_COMPLETE` 状態で残ることがある。バージョンを修正して再度 `terraform apply` してもこの残骸が邪魔になる場合は、手動で削除する：
+
+```bash
+aws cloudformation delete-stack \
+  --stack-name serverlessrepo-{project_name}-rds-rotation \
+  --region ap-northeast-1
+```
+
 **parameters の説明:**
 
 | パラメータ | 説明 |

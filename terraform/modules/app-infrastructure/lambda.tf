@@ -217,7 +217,7 @@ resource "aws_serverlessapplicationrepository_cloudformation_stack" "rotation_la
   # この ARN は AWS が SAR テンプレートを公開している固定のアカウント ID（297356227824）を含む。
   # 自分の AWS アカウント ID ではなく、AWS 公式のテンプレート公開元のため、ハードコードが正しい。
   application_id   = "arn:aws:serverlessrepo:us-east-1:297356227824:applications/SecretsManagerRDSMySQLRotationSingleUser"
-  semantic_version = "1.1.225"
+  semantic_version = "1.1.434"
 
   capabilities = ["CAPABILITY_IAM", "CAPABILITY_RESOURCE_POLICY"]
 
