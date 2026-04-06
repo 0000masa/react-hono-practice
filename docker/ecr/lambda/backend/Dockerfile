@@ -6,6 +6,8 @@ COPY backend/package*.json ./
 RUN npm ci
 
 COPY backend/ ./
+# build:lambda は tsc --noEmit && esbuild ... なので、
+# 型エラーがあればここでビルドが中断され、イメージは作られない
 RUN npm run build:lambda
 
 FROM public.ecr.aws/lambda/nodejs:22
