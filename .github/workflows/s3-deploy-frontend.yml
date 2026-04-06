@@ -1,31 +1,47 @@
 on:
   workflow_dispatch:
+    inputs:
+      target_env:
+        description: "デプロイ先環境"
+        type: choice
+        options:
+          - stg
+          - prod
+        required: true
+        default: stg
 
 env:
-  AWS_ROLE_ARN: ${{ secrets.AWS_S3_DEPLOY_ROLE_ARN }}
   AWS_REGION: ap-northeast-1
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: ${{ inputs.target_env }}
     permissions:
       id-token: write
       contents: read
     steps:
       - uses: actions/checkout@v4
 
+      # prodの場合はmainブランチでしか実行できない
+      - name: Fail on forbidden branch
+        if: inputs.target_env == 'prod' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::prod環境へのデプロイはmainブランチでのみ実行できます。"
+          exit 1
+
       #  AWS 認証 (OIDC ロール)
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_S3_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-                  # ▼▼▼ 追加: SSMから最新のIDを取得して環境変数に入れる ▼▼▼
+      # SSMから最新のIDを取得して環境変数に入れる
       - name: Get Network Configuration from SSM
         run: |
-          BUCKET_NAME=$(aws ssm get-parameter --name "/kum/stg/frontend_bucket_name" --query "Parameter.Value" --output text)
-          DISTRIBUTION_ID=$(aws ssm get-parameter --name "/kum/stg/cloudfront_distribution_id" --query "Parameter.Value" --output text)
-          
+          BUCKET_NAME=$(aws ssm get-parameter --name "/kum/${{ inputs.target_env }}/frontend_bucket_name" --query "Parameter.Value" --output text)
+          DISTRIBUTION_ID=$(aws ssm get-parameter --name "/kum/${{ inputs.target_env }}/cloudfront_distribution_id" --query "Parameter.Value" --output text)
+
           echo "BUCKET_NAME=$BUCKET_NAME" >> $GITHUB_ENV
           echo "DISTRIBUTION_ID=$DISTRIBUTION_ID" >> $GITHUB_ENV
 
@@ -43,8 +59,8 @@ jobs:
       - name: Deploy to S3
         run: |
           aws s3 sync ./frontend/dist s3://${{ env.BUCKET_NAME }} --delete
-      
-      # ▼▼▼ S3配置後にCloudFrontのキャッシュを削除 ▼▼▼
+
+      # S3配置後にCloudFrontのキャッシュを削除
       - name: Invalidate CloudFront Cache
         run: |
           aws cloudfront create-invalidation \
