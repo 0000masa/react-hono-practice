@@ -8,7 +8,7 @@
 resource "aws_db_proxy" "main" {
   name                   = "${var.project_name}-rds-proxy"
   engine_family          = "MYSQL" # MariaDB も MYSQL ファミリー
-  role_arn               = module.rds_proxy_role.iam_role_arn
+  role_arn               = module.rds_proxy_role.arn
   # RDS Proxy は ALB と同様に VPC 内に ENI を作成してトラフィックを中継するマネージドサービス。
   # DB アクセスの仲介が目的でインターネットからの接続は不要なため、
   # プライベートサブネットに配置するのがベストプラクティス。
