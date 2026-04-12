@@ -8,6 +8,13 @@
       "when": 1775471151223,
       "tag": "0000_crazy_giant_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1775978509424,
+      "tag": "0001_adorable_tempest",
+      "breakpoints": true
     }
   ]
 }

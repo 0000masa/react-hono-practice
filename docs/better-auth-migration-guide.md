@@ -359,6 +359,59 @@ export const AuthProvider = ({ children }) => {
 
 ---
 
+## DB マイグレーションの実行手順
+
+### 手順
+
+```bash
+cd backend
+
+# 1. マイグレーションファイルを生成
+npx drizzle-kit generate
+
+# 2. マイグレーションを DB に適用
+npx drizzle-kit push
+# または（Lambda のマイグレーションハンドラーを使う場合）
+npx tsx src/migrate.ts
+```
+
+### `drizzle-kit generate` 実行時の対話プロンプト
+
+スキーマの差分が大きい場合、Drizzle Kit が「このカラムは新規作成？それとも既存カラムのリネーム？」と聞いてくる。
+
+```
+Is token column in sessions table created or renamed from another column?
+❯ + token                 create column
+  ~ payload › token       rename column
+  ~ last_activity › token rename column
+```
+
+**すべて `create column` を選ぶ。** 理由:
+
+| 質問されるカラム | なぜ create なのか |
+|---|---|
+| `sessions.token` | 旧 `payload`（JSON文字列）とは別物。セッショントークン用 |
+| `sessions.expires_at` | 旧 `last_activity`（UNIX int）とは型も用途も異なる |
+| `users.email_verified` | 旧 `email_verified_at`（timestamp）→ boolean に型変更 |
+| `users.image` | 旧 `avatar_url` からのリネームだが、BetterAuth の規約に合わせた新カラム |
+
+`rename` を選ぶと Drizzle Kit は `ALTER TABLE ... RENAME COLUMN` を生成するが、**型が変わる場合（timestamp → boolean 等）はリネームだけでは不十分**でエラーになる。`create` を選べば `DROP COLUMN` + `ADD COLUMN` が生成されるので安全。
+
+### 既存ユーザーデータの扱い
+
+マイグレーション後、既存ユーザーは `users` テーブルに残るが、`accounts` テーブルにはまだ紐付けがない。
+次回 Google ログイン時に BetterAuth が自動で `accounts` レコードを作成するため、手動のデータ移行は不要。
+
+ただし、旧カラム（`google_id`, `password`, `remember_token`）のデータは `DROP COLUMN` で失われる。
+必要であればマイグレーション適用前にバックアップを取ること:
+
+```bash
+# バックアップ例
+mysqldump -u user -p database users > users_backup.sql
+```
+
+---
+
 ## トラブルシューティング
 
 ### CORS エラーが出る
