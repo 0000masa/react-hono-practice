@@ -48,6 +48,7 @@ export async function initDatabase() {
     user: env.DATABASE_USERNAME,
     password: token,
     ssl: { rejectUnauthorized: true },
+    debug: true,
     waitForConnections: true,
     connectionLimit: 1,
   });
@@ -58,22 +59,6 @@ export async function initDatabase() {
     console.log('[initDatabase] pool test query success:', rows);
   } catch (e) {
     console.error('[initDatabase] pool test query failed:', e instanceof Error ? e.message : e);
-    // プール接続に失敗した場合、createConnection で直接試す
-    try {
-      const conn = await mysql.createConnection({
-        host: env.DATABASE_HOST,
-        port: env.DATABASE_PORT,
-        database: env.DATABASE_NAME,
-        user: env.DATABASE_USERNAME,
-        password: token,
-        ssl: { rejectUnauthorized: true },
-      });
-      const [rows2] = await conn.query('SELECT 1 AS test');
-      console.log('[initDatabase] direct connection test success:', rows2);
-      await conn.end();
-    } catch (e2) {
-      console.error('[initDatabase] direct connection also failed:', e2 instanceof Error ? e2.message : e2);
-    }
   }
 
   db = drizzle(pool, { schema, mode: 'default' });
