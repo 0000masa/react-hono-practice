@@ -28,16 +28,7 @@ export const handler = async () => {
   // 2. DB の __drizzle_migrations テーブルで適用済みのマイグレーションを確認（テーブルがなければ自動作成）
   // 3. 未適用の SQL ファイルを番号順に実行
   // 4. 適用したマイグレーションを __drizzle_migrations テーブルに記録
-  try {
-    await migrate(db, { migrationsFolder });
-  } catch (error) {
-    console.error('Migration failed:', error);
-    // drizzle-orm が元のエラーを cause に格納している場合がある
-    if (error instanceof Error && error.cause) {
-      console.error('Cause:', error.cause);
-    }
-    throw error;
-  }
+  await migrate(db, { migrationsFolder });
 
   console.log('Migration completed successfully');
   return { statusCode: 200, body: 'Migration completed' };

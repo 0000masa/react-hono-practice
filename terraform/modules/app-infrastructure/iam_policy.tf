@@ -119,10 +119,12 @@ resource "aws_iam_policy" "lambda_rds_proxy_policy" {
         # rds-db:connect: RDS Proxy に IAM 認証で接続することを許可するアクション
         Action = "rds-db:connect"
         # Resource の ARN は「どの RDS Proxy に、どの DB ユーザーとして接続できるか」を指定する。
-        # 形式: arn:aws:rds-db:{リージョン}:{AWSアカウントID}:dbuser:{RDS ProxyのID}/{DBユーザー名}
+        # 形式: arn:aws:rds-db:{リージョン}:{AWSアカウントID}:dbuser:{RDS ProxyリソースID}/{DBユーザー名}
         # 例: arn:aws:rds-db:ap-northeast-1:123456789012:dbuser:prx-0abcdef123456/admin
+        # 注意: aws_db_proxy.main.id は Proxy の「名前」を返すが、ここでは「リソース ID」（prx-xxx 形式）が必要。
+        # Proxy の ARN（arn:aws:rds:{region}:{account}:db-proxy:prx-xxx）からリソース ID を抽出する。
         # これにより、この特定の RDS Proxy に指定した DB ユーザーとしてのみ接続できる最小権限に絞られる。
-        Resource = "arn:aws:rds-db:ap-northeast-1:${data.aws_caller_identity.current.account_id}:dbuser:${aws_db_proxy.main.id}/${var.db_username}"
+        Resource = "arn:aws:rds-db:ap-northeast-1:${data.aws_caller_identity.current.account_id}:dbuser:${element(split(":", aws_db_proxy.main.arn), 6)}/${var.db_username}"
       }
     ]
   })
