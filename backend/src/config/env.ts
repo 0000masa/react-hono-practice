@@ -26,7 +26,6 @@ export const env = {
   GOOGLE_CALLBACK_URL: getEnv('GOOGLE_CALLBACK_URL', 'http://localhost:3000/api/auth/google/callback'),
   FRONTEND_URL: getEnv('FRONTEND_URL', 'http://localhost:5173'),
 
-  SESSION_SECRET: getEnv('SESSION_SECRET', 'your-secret-key'),
 
   S3_ENDPOINT: getEnv('S3_ENDPOINT', 'http://minio:9000'),
   S3_BUCKET: getEnv('S3_BUCKET', 'qrcodes'),

@@ -28,6 +28,9 @@ resource "aws_lambda_function" "api" {
       DATABASE_USERNAME     = var.db_username
       DATABASE_USE_IAM_AUTH = "true"
       FRONTEND_URL          = "https://${var.sub_frontend_domain_name}.${var.domain_name}"
+      GOOGLE_CLIENT_ID      = data.aws_ssm_parameter.google_client_id.value
+      GOOGLE_CLIENT_SECRET  = data.aws_ssm_parameter.google_client_secret.value
+      GOOGLE_CALLBACK_URL   = "https://${var.sub_frontend_domain_name}.${var.domain_name}/api/auth/google/callback"
       S3_BUCKET             = aws_s3_bucket.image_bucket.id
       S3_REGION             = "ap-northeast-1"
       CLOUDFRONT_URL        = "https://${aws_cloudfront_distribution.image_cdn.domain_name}"

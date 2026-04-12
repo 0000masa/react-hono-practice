@@ -28,12 +28,6 @@
 | `GOOGLE_CALLBACK_URL` | コールバック URL | `http://localhost:3000/api/auth/google/callback` | `https://api.example.com/api/auth/google/callback` |
 | `FRONTEND_URL` | フロントエンド URL | `http://localhost:5173` | `https://example.com` |
 
-### セッション
-
-| 変数名 | 説明 | デフォルト値 | 本番例 |
-|--------|------|-------------|--------|
-| `SESSION_SECRET` | セッション署名キー | `your-secret-key` | (ランダム文字列) |
-
 ### ストレージ (S3/MinIO)
 
 | 変数名 | 説明 | デフォルト値 | 本番例 |
