@@ -67,7 +67,29 @@ with this name is already scheduled for deletion.
 
 ### 対処法: 強制削除コマンド
 
-`terraform apply` の前に、削除予定のシークレットを強制削除する：
+まず、AWS CLI の動作確認と削除予定のシークレットの確認を行う：
+
+```bash
+aws secretsmanager list-secrets --include-planned-deletion --region ap-northeast-1
+```
+
+出力は JSON 形式で表示される。結果が長い場合、AWS CLI が自動的に `less` ページャーを起動する（画面下部に `(END)` と表示される）。**`q` キー**を押すとページャーが終了してターミナルに戻る。
+
+ページャーを使わずに直接出力したい場合は `--no-cli-pager` オプションを付ける：
+
+```bash
+aws secretsmanager list-secrets --include-planned-deletion --region ap-northeast-1 --no-cli-pager
+```
+
+永続的にページャーを無効化する場合：
+
+```bash
+aws configure set cli_pager ""
+```
+
+出力結果に `DeletedDate` フィールドがあるシークレットが削除予定状態のもの。
+
+削除予定のシークレットが確認できたら、`terraform apply` の前に強制削除する：
 
 ```bash
 aws secretsmanager delete-secret \
