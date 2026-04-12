@@ -128,7 +128,7 @@ module "notification_lambda_role" {
 
   policies = {
     LambdaBasicExecutionRole    = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-    LambdaReadLaravelLogsPolicy = aws_iam_policy.lambda_read_laravel_logs.arn,
+    LambdaReadHonoLogsPolicy = aws_iam_policy.lambda_read_hono_logs.arn,
     LambdaSesSendPolicy         = aws_iam_policy.ses_send_policy.arn,
   }
 }

@@ -65,8 +65,8 @@ resource "aws_cloudwatch_metric_alarm" "lambda_api_errors" {
     FunctionName = aws_lambda_function.api.function_name
   }
 
-  alarm_actions = [aws_sns_topic.ecs_task_shortage.arn]
-  ok_actions    = [aws_sns_topic.ecs_task_shortage.arn]
+  alarm_actions = [aws_sns_topic.alert.arn]
+  ok_actions    = [aws_sns_topic.alert.arn]
 }
 
 # API Lambda のスロットリングアラーム
@@ -88,6 +88,6 @@ resource "aws_cloudwatch_metric_alarm" "lambda_api_throttles" {
     FunctionName = aws_lambda_function.api.function_name
   }
 
-  alarm_actions = [aws_sns_topic.ecs_task_shortage.arn]
-  ok_actions    = [aws_sns_topic.ecs_task_shortage.arn]
+  alarm_actions = [aws_sns_topic.alert.arn]
+  ok_actions    = [aws_sns_topic.alert.arn]
 }

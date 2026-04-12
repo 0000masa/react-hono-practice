@@ -131,7 +131,7 @@ def lambda_handler(event, context):
 
     description = f"{app_env}環境でエラーが発生しました。\nエラー文:\n{error_text}"
 
-    formatted_message = f"""【practice-laravel-deploy - エラー報告】
+    formatted_message = f"""【react-hono-practice - エラー報告】
 エラーの種類: {error_type}
 発生時間: {occurred_at}
 対応: エラーの確認及び、対応をお願いいたします。
@@ -143,7 +143,7 @@ Log Stream: {log_stream}
 """
 
     # メールで送信（宛先が設定されている時だけ）
-    mail_subject = f"【practice-laravel-deploy - エラー報告】{app_env} / {error_type} / {occurred_at}"
+    mail_subject = f"【react-hono-practice - エラー報告】{app_env} / {error_type} / {occurred_at}"
     send_email(mail_subject, formatted_message)
 
     return {"statusCode": 200, "body": json.dumps("通知完了", ensure_ascii=False)}

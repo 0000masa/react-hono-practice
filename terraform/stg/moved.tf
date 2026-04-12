@@ -285,8 +285,8 @@
 # }
 
 # moved {
-#   from = aws_iam_policy.lambda_read_laravel_logs
-#   to   = module.app.aws_iam_policy.lambda_read_laravel_logs
+#   from = aws_iam_policy.lambda_read_hono_logs
+#   to   = module.app.aws_iam_policy.lambda_read_hono_logs
 # }
 
 # # --- Lambda ---
@@ -312,8 +312,8 @@
 # }
 
 # moved {
-#   from = aws_cloudwatch_log_subscription_filter.laravel_error_critical_to_lambda
-#   to   = module.app.aws_cloudwatch_log_subscription_filter.laravel_error_critical_to_lambda
+#   from = aws_cloudwatch_log_subscription_filter.hono_error_critical_to_lambda
+#   to   = module.app.aws_cloudwatch_log_subscription_filter.hono_error_critical_to_lambda
 # }
 
 # moved {
@@ -399,13 +399,13 @@
 
 # # --- SNS ---
 # moved {
-#   from = aws_sns_topic.ecs_task_shortage
-#   to   = module.app.aws_sns_topic.ecs_task_shortage
+#   from = module.app.aws_sns_topic.ecs_task_shortage
+#   to   = module.app.aws_sns_topic.alert
 # }
 
 # moved {
-#   from = aws_sns_topic_subscription.ecs_task_shortage_email
-#   to   = module.app.aws_sns_topic_subscription.ecs_task_shortage_email
+#   from = module.app.aws_sns_topic_subscription.ecs_task_shortage_email
+#   to   = module.app.aws_sns_topic_subscription.alert_email
 # }
 
 # # --- SQS ---

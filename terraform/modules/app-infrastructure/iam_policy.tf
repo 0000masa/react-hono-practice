@@ -201,13 +201,13 @@ resource "aws_iam_policy" "rotation_lambda_policy" {
 }
 
 # 通知 Lambda 用: CloudWatch Logs 読み取り
-resource "aws_iam_policy" "lambda_read_laravel_logs" {
-  name = "${var.project_name}-lambda-read-laravel-logs"
+resource "aws_iam_policy" "lambda_read_hono_logs" {
+  name = "${var.project_name}-lambda-read-hono-logs"
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "ReadLaravelLogs"
+        Sid    = "ReadHonoLogs"
         Effect = "Allow"
         Action = [
           "logs:FilterLogEvents"
