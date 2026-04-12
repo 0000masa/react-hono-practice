@@ -36,9 +36,12 @@ data "aws_cloudfront_cache_policy" "caching_disabled" {
   name = "Managed-CachingDisabled"
 }
 
-# API用なので「Cookieやヘッダーを全て通す」ポリシーを取得
-data "aws_cloudfront_origin_request_policy" "all_viewer" {
-  name = "Managed-AllViewer"
+# API用なので「Cookieやヘッダーを全て通す（Hostヘッダー除く）」ポリシーを取得
+# Managed-AllViewer だと Host ヘッダー（www.favoritemyanime.com）がそのまま
+# API Gateway に転送され、カスタムドメイン未設定のため 403 Forbidden になる。
+# ExceptHostHeader を使うことで CloudFront がオリジンの Host に自動変換する。
+data "aws_cloudfront_origin_request_policy" "all_viewer_except_host" {
+  name = "Managed-AllViewerExceptHostHeader"
 }
 
 # 通知 Lambda 用の zip ファイル
