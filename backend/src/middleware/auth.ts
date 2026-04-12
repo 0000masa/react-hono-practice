@@ -1,9 +1,9 @@
 import { createMiddleware } from 'hono/factory';
-import { auth } from '../config/auth';
+import { getAuth } from '../config/auth';
 import type { AuthUser, Env } from '../types/index';
 
 export const authMiddleware = createMiddleware<Env>(async (c, next) => {
-  const session = await auth.api.getSession({
+  const session = await getAuth().api.getSession({
     headers: c.req.raw.headers,
   });
 
