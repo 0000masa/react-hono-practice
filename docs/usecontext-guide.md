@@ -18,50 +18,94 @@ App（Providerで user をセット）
             └─ UserMenu ← useAuth() で直接 user を取得
 ```
 
-## 4ファイルの関係図
+## 5ファイルの関係図
 
 ```
-authContext.types.ts    ← 型定義とContext作成
+auth-client.ts           ← BetterAuth クライアント作成
        ↓
-AuthContext.tsx          ← Contextに値をセットする Provider
+authContext.types.ts     ← 型定義とContext作成
        ↓
-App.tsx                  ← Providerでアプリ全体を囲む
+AuthContext.tsx           ← auth-client を使って値をセットする Provider
        ↓
-useAuth.ts               ← Contextから値を取り出すカスタムフック
+App.tsx                   ← Providerでアプリ全体を囲む
        ↓
-各ページコンポーネント    ← useAuth() で user や logout を使う
+useAuth.ts                ← Contextから値を取り出すカスタムフック
+       ↓
+各ページコンポーネント     ← useAuth() で user や logout を使う
 ```
 
 ## 各ファイルの役割
 
-### 1. `authContext.types.ts` — 箱を作る
+### 1. `auth-client.ts` — BetterAuth クライアントを作る
 
 ```typescript
+import { createAuthClient } from 'better-auth/react';
+
+const baseURL = import.meta.env.VITE_API_BASE_URL;
+
+export const authClient = createAuthClient({
+  baseURL: baseURL ? baseURL.replace(/\/api$/, '') : '',
+  basePath: '/api/auth',
+});
+```
+
+`authClient` はバックエンドの BetterAuth API と通信するためのクライアント。セッション取得 (`getSession`)、ログアウト (`signOut`)、Google ログイン (`signIn.social`) などのメソッドを提供する。
+
+### 2. `authContext.types.ts` — 箱を作る
+
+```typescript
+export interface AuthContextType {
+  user: User | null;
+  isLoading: boolean;
+  logout: () => Promise<void>;
+}
+
 // 「認証情報を入れる箱」を作る（中身はまだ空）
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 ```
 
 `createContext` は**グローバルな入れ物（箱）**を作る。この時点では中身は `undefined`。
 
-### 2. `AuthContext.tsx` — 箱に中身を入れる
+### 3. `AuthContext.tsx` — 箱に中身を入れる
 
 ```typescript
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  // ... login, logout, checkAuth を定義 ...
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  useEffect(() => {
+    const checkSession = async () => {
+      const { data: session } = await authClient.getSession();
+      if (session?.user) {
+        setUser({
+          id: Number(session.user.id),
+          name: session.user.name,
+          email: session.user.email,
+          avatar_url: session.user.image ?? null,
+        });
+      }
+      setIsLoading(false);
+    };
+    checkSession();
+  }, []);
+
+  const logout = async () => {
+    await authClient.signOut();
+    setUser(null);
+  };
 
   return (
     // AuthContext.Provider で箱に値を入れる
-    <AuthContext.Provider value={{ user, isLoading, login, logout, checkAuth }}>
+    <AuthContext.Provider value={{ user, isLoading, logout }}>
       {children}  {/* ← 子コンポーネント全てがこの値にアクセスできる */}
     </AuthContext.Provider>
   );
 };
 ```
 
-`Provider` が**箱に中身（value）を入れる役割**。
+`Provider` が**箱に中身（value）を入れる役割**。マウント時に `authClient.getSession()` でセッションを確認し、ユーザー情報を Context にセットする。
 
-### 3. `App.tsx` — Provider でアプリを囲む
+### 4. `App.tsx` — Provider でアプリを囲む
 
 ```typescript
 function App() {
@@ -69,9 +113,11 @@ function App() {
     <BrowserRouter>
       <AuthProvider>       {/* ← ここで囲んだ範囲の子孫が値にアクセスできる */}
         <Routes>
+          <Route path="/login" element={<Login />} />
           <Route path="/dashboard" element={
             <ProtectedRoute><Dashboard /></ProtectedRoute>
           } />
+          <Route path="/auth/callback" element={<Callback />} />
           ...
         </Routes>
       </AuthProvider>
@@ -82,7 +128,7 @@ function App() {
 
 `AuthProvider` の内側にある全コンポーネントが認証情報にアクセスできる。
 
-### 4. `useAuth.ts` — 箱から中身を取り出す
+### 5. `useAuth.ts` — 箱から中身を取り出す
 
 ```typescript
 export const useAuth = () => {
@@ -94,7 +140,7 @@ export const useAuth = () => {
     throw new Error('useAuth must be used within an AuthProvider');
   }
 
-  return context;  // { user, isLoading, login, logout, checkAuth }
+  return context;  // { user, isLoading, logout }
 };
 ```
 
@@ -108,11 +154,14 @@ const { user, logout } = useAuth();
 
 `useAuth` でラップしている理由は、毎回 `useContext(AuthContext)` と書く手間を省くのと、Provider の外で誤って使った場合にエラーを出すため。
 
+なお、ログイン処理は `authClient.signIn.social({ provider: 'google' })` を直接呼ぶため Context には含まれていない（Login ページでのみ使用）。
+
 ## 流れのまとめ
 
 ```
-1. createContext()        → 空の箱を作る
-2. Provider value={...}   → 箱に値を入れる
-3. App で Provider で囲む  → どの範囲のコンポーネントがアクセスできるか決める
-4. useContext()           → 箱から値を取り出す（useAuth でラップ）
+1. createAuthClient()     → BetterAuth クライアントを作る（バックエンドとの通信用）
+2. createContext()         → 空の箱を作る
+3. Provider value={...}    → authClient でセッションを取得し、箱に値を入れる
+4. App で Provider で囲む   → どの範囲のコンポーネントがアクセスできるか決める
+5. useContext()            → 箱から値を取り出す（useAuth でラップ）
 ```

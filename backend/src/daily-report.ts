@@ -2,7 +2,6 @@ import { eq, and, gte, lt, count } from 'drizzle-orm';
 import { initDatabase, db } from './config/database';
 import { qrCodes, users } from './db/schema';
 import { sendMail } from './services/mail.service';
-import { env } from './config/env';
 
 const dbReady = initDatabase();
 
