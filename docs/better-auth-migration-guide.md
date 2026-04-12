@@ -22,7 +22,7 @@ BetterAuth は OAuth・セッション・DB 連携をワンパッケージで提
 | セッション管理 | 自前で実装が必要 | 内蔵（DB 保存 + Cookie 自動管理） |
 | DB 連携 | なし（自分で書く） | Drizzle / Prisma 等のアダプター付き |
 | フロントエンド SDK | なし | `better-auth/react` で hooks 提供 |
-| 認証ルート | 自分で Controller を書く | `auth.handler()` が自動で処理 |
+| 認証ルート | 自分で Controller を書く | `getAuth().handler()` が自動で処理 |
 | プロバイダー追加 | 各プロバイダーのクラスを個別に使う | `socialProviders` に設定を足すだけ |
 
 ### Arctic の構成（移行前）
@@ -87,7 +87,7 @@ getSession()
 
 必要なファイル:
 - `config/auth.ts` — `betterAuth()` の設定（これ 1 ファイルだけ）
-- `middleware/auth.ts` — `auth.api.getSession()` で保護ルートのガード
+- `middleware/auth.ts` — `getAuth().api.getSession()` で保護ルートのガード
 
 ---
 
@@ -132,56 +132,70 @@ BetterAuth のデフォルトは UUID (string) だが、`advanced.database.gener
 ```typescript
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { db } from './database';
+import * as schema from '../db/schema';
+import { env } from './env';
 
-export const auth = betterAuth({
-  database: drizzleAdapter(db, {
-    provider: 'mysql',
-    schema,
-    usePlural: true,   // テーブル名を複数形で探す (users, sessions, accounts...)
-  }),
-  secret: env.BETTER_AUTH_SECRET,
-  baseURL: env.FRONTEND_URL,    // ← バックエンドではなくフロントエンドの URL
-  basePath: '/api/auth',
-  socialProviders: {
-    google: {
-      clientId: env.GOOGLE_CLIENT_ID,
-      clientSecret: env.GOOGLE_CLIENT_SECRET,
+// 遅延初期化（理由は後述の「Lambda での遅延初期化」セクションを参照）
+function createAuth() {
+  return betterAuth({
+    database: drizzleAdapter(db, {
+      provider: 'mysql',
+      schema,
+      usePlural: true,   // テーブル名を複数形で探す (users, sessions, accounts...)
+    }),
+    secret: env.BETTER_AUTH_SECRET,
+    baseURL: env.FRONTEND_URL,    // ← バックエンドではなくフロントエンドの URL
+    basePath: '/api/auth',
+    socialProviders: {
+      google: {
+        clientId: env.GOOGLE_CLIENT_ID,
+        clientSecret: env.GOOGLE_CLIENT_SECRET,
+      },
     },
-  },
-  session: {
-    expiresIn: 60 * 60 * 24 * 7,  // 7日間
-    updateAge: 60 * 60 * 24,       // 1日経過でリフレッシュ
-    cookieCache: {
-      enabled: true,
-      maxAge: 5 * 60,              // 5分間DBクエリをスキップ
+    session: {
+      expiresIn: 60 * 60 * 24 * 7,  // 7日間
+      updateAge: 60 * 60 * 24,       // 1日経過でリフレッシュ
+      cookieCache: {
+        enabled: true,
+        maxAge: 5 * 60,              // 5分間DBクエリをスキップ
+      },
     },
-  },
-  trustedOrigins: [env.FRONTEND_URL],
-});
+    trustedOrigins: [env.FRONTEND_URL],
+  });
+}
+
+let _auth: ReturnType<typeof createAuth> | null = null;
+
+export function getAuth() {
+  _auth ??= createAuth();
+  return _auth;
+}
 ```
 
 - **`baseURL: env.FRONTEND_URL`** — 後述の「baseURL をフロントエンドにする理由」で詳しく説明
 - `usePlural: true` により、BetterAuth が `user` ではなく `users`、`session` ではなく `sessions` テーブルを探す
 - `cookieCache` を有効にすると、セッション情報を署名付き Cookie にキャッシュして DB クエリを減らせる
 - `trustedOrigins` にフロントエンドの URL を指定して CORS を許可
+- **`getAuth()` による遅延初期化** — `betterAuth()` を即座に呼ばず、最初のリクエスト時に呼ぶ。詳しくは「Lambda での遅延初期化」セクションを参照
 
 **`app.ts`** — Hono へのマウント:
 
 ```typescript
 // BetterAuth が /api/auth/* の全ルートを自動処理
 app.on(['POST', 'GET'], '/api/auth/*', (c) => {
-  return auth.handler(c.req.raw);
+  return getAuth().handler(c.req.raw);
 });
 ```
 
-`auth.handler()` は Web 標準の `Request` を受け取り `Response` を返す。
+`getAuth().handler()` は Web 標準の `Request` を受け取り `Response` を返す。
 Hono の `c.req.raw` で生の Request オブジェクトを渡す。
 
 **`middleware/auth.ts`** — 保護ルートのガード:
 
 ```typescript
 export const authMiddleware = createMiddleware<Env>(async (c, next) => {
-  const session = await auth.api.getSession({
+  const session = await getAuth().api.getSession({
     headers: c.req.raw.headers,
   });
 
@@ -200,7 +214,7 @@ export const authMiddleware = createMiddleware<Env>(async (c, next) => {
 });
 ```
 
-`auth.api.getSession()` はサーバーサイドでセッションを検証する API。
+`getAuth().api.getSession()` はサーバーサイドでセッションを検証する API。
 Cookie の `better-auth.session_token` を読み取り、DB (またはキャッシュ) からセッションを取得する。
 
 ### 3. フロントエンドの変更
@@ -426,7 +440,7 @@ export const AuthProvider = ({ children }) => {
 | GET | `/api/auth/get-session` | セッション取得 |
 | POST | `/api/auth/sign-out` | ログアウト |
 
-これらは `app.on(['POST', 'GET'], '/api/auth/*', ...)` で一括キャッチされ、`auth.handler()` が処理する。
+これらは `app.on(['POST', 'GET'], '/api/auth/*', ...)` で一括キャッチされ、`getAuth().handler()` が処理する。
 
 ---
 
@@ -483,6 +497,95 @@ mysqldump -u user -p database users > users_backup.sql
 
 ---
 
+## Lambda での遅延初期化（なぜ `getAuth()` が必要か）
+
+### 問題: `betterAuth()` をモジュール読み込み時に実行すると本番で `db` が `undefined` になる
+
+開発環境ではパスワード認証で DB 接続を行うため、`database.ts` のモジュール読み込み時に `db` が同期的に初期化される。
+しかし本番環境（Lambda + IAM 認証）では、AWS IAM 認証トークンの取得がネットワーク通信を伴う非同期処理なので、`db` は `initDatabase()` の `await` 完了後に初めて値が入る。
+
+もし `auth.ts` で `betterAuth()` をモジュールの トップレベルで即座に実行すると、以下の順序で問題が起きる:
+
+```
+Lambda コールドスタート時のモジュール読み込み順序:
+
+1. lambda.ts が import を解決
+   ├─ import app from './app'
+   │    ├─ import { auth } from './config/auth'     ← ここで auth.ts が読み込まれる
+   │    │    ├─ import { db } from './database'      ← db はまだ undefined（IAM 認証の場合）
+   │    │    └─ export const auth = betterAuth({
+   │    │         database: drizzleAdapter(db, ...)   ← undefined が渡される！
+   │    │       })
+   │    └─ app.on('/api/auth/*', (c) => auth.handler(c.req.raw))
+   │
+   └─ import { initDatabase } from './config/database'
+
+2. const dbReady = initDatabase()   ← ここで初めて db の初期化が始まる
+3. handler が呼ばれる
+4. await dbReady                    ← db が使えるようになる（が、auth は既に undefined の db で作られている）
+5. リクエスト処理 → auth.handler() → db.insert() → TypeError!
+```
+
+ES モジュールの `import` はすべてのモジュールの評価（トップレベルのコード実行）が完了してから、`lambda.ts` の本体コード（`const dbReady = initDatabase()`）が実行される。
+そのため、`auth.ts` のトップレベルで `betterAuth()` を呼ぶと、`initDatabase()` より先に実行されてしまう。
+
+### エラーメッセージ
+
+```
+TypeError: Cannot read properties of undefined (reading 'insert')
+    at Object.create (/var/task/lambda.js:90504:47)
+```
+
+BetterAuth が Google ログイン時にユーザーを DB に挿入しようとして `db.insert()` を呼ぶが、`db` が `undefined` のためこのエラーになる。
+
+### 解決策: 遅延初期化
+
+`betterAuth()` の呼び出しをモジュール読み込み時ではなく、最初のリクエスト時まで遅延させる:
+
+```typescript
+// config/auth.ts
+function createAuth() {
+  return betterAuth({ ... });
+}
+
+let _auth: ReturnType<typeof createAuth> | null = null;
+
+export function getAuth() {
+  _auth ??= createAuth();  // 初回呼び出し時に1回だけ betterAuth() を実行
+  return _auth;
+}
+```
+
+```
+修正後の実行順序:
+
+1. モジュール読み込み
+   └─ auth.ts: createAuth() と getAuth() を定義するだけ（betterAuth() はまだ呼ばない）
+
+2. const dbReady = initDatabase()
+3. handler が呼ばれる
+4. await dbReady              ← db が初期化完了
+5. getAuth().handler(...)     ← ここで初めて betterAuth() が呼ばれる（db は初期化済み）
+```
+
+`lambda.ts` の handler は `await dbReady` の後でリクエストを処理するため、`getAuth()` が呼ばれる時点では `db` は必ず初期化済みになっている。
+
+### 開発環境では問題にならない理由
+
+`database.ts` で `DATABASE_USE_IAM_AUTH` が `false`（開発環境）の場合:
+
+```typescript
+if (!env.DATABASE_USE_IAM_AUTH) {
+  pool = mysql.createPool({ ... });   // 同期的に作成
+  db = drizzle(pool, { schema });     // 同期的に初期化
+}
+```
+
+`db` がモジュール読み込み時に同期的に初期化されるため、たとえ `betterAuth()` を即座に呼んでも `db` は有効な値を持っている。
+そのため、この問題は本番環境（Lambda + IAM 認証）でのみ発生する。
+
+---
+
 ## トラブルシューティング
 
 ### CORS エラーが出る
@@ -490,7 +593,8 @@ mysqldump -u user -p database users > users_backup.sql
 `trustedOrigins` にフロントエンドの URL が入っているか確認:
 
 ```typescript
-export const auth = betterAuth({
+// config/auth.ts の createAuth() 内
+betterAuth({
   trustedOrigins: [env.FRONTEND_URL],  // "http://localhost:5173"
 });
 ```
