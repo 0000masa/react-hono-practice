@@ -48,16 +48,34 @@ export async function initDatabase() {
     user: env.DATABASE_USERNAME,
     password: token,
     ssl: { rejectUnauthorized: true },
-    // RDS Proxy の IAM 認証では mysql_clear_password プラグインが必要。
-    // RDS Proxy はクライアントに IAM トークンを平文パスワードとして送信するよう要求するが、
-    // mysql2 はデフォルトでは mysql_clear_password をサポートしないため、
-    // 明示的にプラグインを登録してトークンを平文で送信する。
-    authPlugins: {
-      mysql_clear_password: () => () => Buffer.from(token + '\0'),
-    },
     waitForConnections: true,
     connectionLimit: 1,
   });
+
+  // デバッグ: プール接続テスト
+  try {
+    const [rows] = await pool.query('SELECT 1 AS test');
+    console.log('[initDatabase] pool test query success:', rows);
+  } catch (e) {
+    console.error('[initDatabase] pool test query failed:', e instanceof Error ? e.message : e);
+    // プール接続に失敗した場合、createConnection で直接試す
+    try {
+      const conn = await mysql.createConnection({
+        host: env.DATABASE_HOST,
+        port: env.DATABASE_PORT,
+        database: env.DATABASE_NAME,
+        user: env.DATABASE_USERNAME,
+        password: token,
+        ssl: { rejectUnauthorized: true },
+      });
+      const [rows2] = await conn.query('SELECT 1 AS test');
+      console.log('[initDatabase] direct connection test success:', rows2);
+      await conn.end();
+    } catch (e2) {
+      console.error('[initDatabase] direct connection also failed:', e2 instanceof Error ? e2.message : e2);
+    }
+  }
+
   db = drizzle(pool, { schema, mode: 'default' });
 }
 
