@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import auth from './auth';
 import usersRoute from './users';
 import qrcodes from './qrcodes';
 import mail from './mail';
@@ -8,7 +7,6 @@ import type { Env } from '../types/index';
 
 const api = new Hono<Env>();
 
-api.route('/auth', auth);
 api.route('/users', usersRoute);
 api.route('/qrcodes', qrcodes);
 api.route('/mail', mail);

@@ -1,14 +1,14 @@
 import React, { useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import apiClient from '../lib/api';
+import { authClient } from '../lib/auth-client';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const hasCleanedError = useRef(false);
-  
+
   // URLパラメータからエラーメッセージを取得
   const errorParam = searchParams.get('error');
   const error = errorParam ? decodeURIComponent(errorParam) : null;
@@ -24,19 +24,19 @@ const Login: React.FC = () => {
   useEffect(() => {
     if (errorParam && !hasCleanedError.current) {
       hasCleanedError.current = true;
-      // URLパラメータを削除（replace: trueで履歴に残さない）
       const newSearchParams = new URLSearchParams(searchParams);
       newSearchParams.delete('error');
       navigate(`/login?${newSearchParams.toString()}`, { replace: true });
     }
   }, [errorParam, searchParams, navigate]);
 
-  // Google認証URLを取得してリダイレクト
+  // Google認証
   const handleGoogleLogin = async () => {
     try {
-      const response = await apiClient.get<{ url: string }>('/auth/google');
-      // バックエンドから返されたGoogle認証URLにリダイレクト
-      window.location.href = response.data.url;
+      await authClient.signIn.social({
+        provider: 'google',
+        callbackURL: '/dashboard',
+      });
     } catch (error) {
       console.error('Googleログインエラー:', error);
       alert('ログインに失敗しました');
@@ -91,4 +91,3 @@ const Login: React.FC = () => {
 };
 
 export default Login;
-

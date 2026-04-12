@@ -5,17 +5,19 @@ export type User = InferSelectModel<typeof users>;
 export type QrCode = InferSelectModel<typeof qrCodes>;
 export type Session = InferSelectModel<typeof sessions>;
 
-export type SessionData = {
-  userId?: number;
-  [key: string]: unknown;
+export type AuthUser = {
+  id: number;
+  name: string;
+  email: string;
+  emailVerified: boolean;
+  image: string | null;
+  createdAt: Date;
+  updatedAt: Date;
 };
 
 export type Env = {
   Variables: {
-    session: SessionData;
-    sessionId: string;
-    sessionChanged: boolean;
-    user: User;
+    user: AuthUser;
   };
 };
 

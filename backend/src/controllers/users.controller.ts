@@ -18,7 +18,7 @@ export async function index(c: Context<Env>) {
       id: users.id,
       name: users.name,
       email: users.email,
-      avatarUrl: users.avatarUrl,
+      image: users.image,
       createdAt: users.createdAt,
     })
     .from(users)
@@ -44,7 +44,7 @@ export async function index(c: Context<Env>) {
       id: u.id,
       name: u.name,
       email: u.email,
-      avatar_url: u.avatarUrl,
+      avatar_url: u.image,
       created_at: u.createdAt,
     })),
     pagination,

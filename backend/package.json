@@ -14,7 +14,7 @@
     "@aws-sdk/rds-signer": "^3.1012.0",
     "@hono/node-server": "^1.19.11",
     "@hono/zod-validator": "^0.7.6",
-    "arctic": "^3.7.0",
+    "better-auth": "^1.6.2",
     "dotenv": "^17.3.1",
     "drizzle-orm": "^0.45.1",
     "hono": "^4.12.8",

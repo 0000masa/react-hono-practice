@@ -21,9 +21,9 @@ export const env = {
   DATABASE_PASSWORD: getEnv('DATABASE_PASSWORD', 'password'),
   DATABASE_USE_IAM_AUTH: getEnv('DATABASE_USE_IAM_AUTH', 'false') === 'true',
 
+  BETTER_AUTH_SECRET: getEnv('BETTER_AUTH_SECRET', 'dev-secret-change-in-production'),
   GOOGLE_CLIENT_ID: getEnv('GOOGLE_CLIENT_ID', ''),
   GOOGLE_CLIENT_SECRET: getEnv('GOOGLE_CLIENT_SECRET', ''),
-  GOOGLE_CALLBACK_URL: getEnv('GOOGLE_CALLBACK_URL', 'http://localhost:3000/api/auth/google/callback'),
   FRONTEND_URL: getEnv('FRONTEND_URL', 'http://localhost:5173'),
 
 
