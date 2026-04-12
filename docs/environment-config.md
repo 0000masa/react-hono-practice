@@ -19,14 +19,17 @@
 | `DATABASE_USER` | DB ユーザー | `user` | `admin` |
 | `DATABASE_PASSWORD` | DB パスワード | `password` | (Secrets Manager) |
 
-### Google OAuth
+### 認証 (BetterAuth)
 
 | 変数名 | 説明 | デフォルト値 | 本番例 |
 |--------|------|-------------|--------|
-| `GOOGLE_CLIENT_ID` | クライアント ID | (空) | `xxxx.apps.googleusercontent.com` |
-| `GOOGLE_CLIENT_SECRET` | クライアントシークレット | (空) | (Secrets Manager) |
-| `GOOGLE_CALLBACK_URL` | コールバック URL | `http://localhost:3000/api/auth/google/callback` | `https://api.example.com/api/auth/google/callback` |
+| `BETTER_AUTH_SECRET` | セッション Cookie の署名と Cookie キャッシュの暗号化に使う秘密鍵。本番で未設定だとエラー | `dev-secret-change-in-production` | (SSM Parameter Store) |
+| `GOOGLE_CLIENT_ID` | Google OAuth クライアント ID | (空) | `xxxx.apps.googleusercontent.com` |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth クライアントシークレット | (空) | (SSM Parameter Store) |
 | `FRONTEND_URL` | フロントエンド URL | `http://localhost:5173` | `https://example.com` |
+
+BetterAuth は `FRONTEND_URL` + `basePath` からコールバック URL を自動生成する（例: `https://example.com/api/auth/callback/google`）。
+そのため旧 Arctic 構成で使っていた `GOOGLE_CALLBACK_URL` は不要になった。
 
 ### ストレージ (S3/MinIO)
 
@@ -62,8 +65,9 @@ S3 関連はデフォルト値が空のため、`.env` に MinIO 用の値を明
 
 - `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` は **未設定**（Lambda 実行ロールの IAM 認証 + S3 デフォルトエンドポイントを使用）
 - `S3_FORCE_PATH_STYLE` は **未設定**（デフォルト `false` = AWS S3 の仮想ホスト形式）
+- `BETTER_AUTH_SECRET` は SSM Parameter Store から取得
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` は SSM Parameter Store から取得
-- `GOOGLE_CALLBACK_URL` は CloudFront ドメイン経由（例: `https://www.favoritemyanime.com/api/auth/google/callback`）
+- `FRONTEND_URL` に CloudFront ドメインを設定（例: `https://www.example.com`）。BetterAuth がこの値からコールバック URL を自動生成する
 - `STORAGE_URL_BASE` に CloudFront ドメインを設定
 - `SMTP_HOST` に SES SMTP エンドポイントを設定
 - Cookie に `secure: true` が自動設定 (`NODE_ENV=production`)
