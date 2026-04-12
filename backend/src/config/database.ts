@@ -44,6 +44,13 @@ export async function initDatabase() {
     user: env.DATABASE_USERNAME,
     password: token,
     ssl: { rejectUnauthorized: true },
+    // RDS Proxy の IAM 認証では mysql_clear_password プラグインが必要。
+    // RDS Proxy はクライアントに IAM トークンを平文パスワードとして送信するよう要求するが、
+    // mysql2 はデフォルトでは mysql_clear_password をサポートしないため、
+    // 明示的にプラグインを登録してトークンを平文で送信する。
+    authPlugins: {
+      mysql_clear_password: () => () => Buffer.from(token + '\0'),
+    },
     waitForConnections: true,
     connectionLimit: 1,
   });
