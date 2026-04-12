@@ -184,7 +184,6 @@ resource "aws_lambda_function" "daily_report" {
       DATABASE_USE_IAM_AUTH = "true"
       SES_REGION            = "ap-northeast-1"
       MAIL_FROM             = "noreply@${aws_ses_domain_mail_from.main.mail_from_domain}"
-      ALERT_EMAIL_TO        = var.alert_email_to
       APP_ENV               = var.app_env
     }
   }
