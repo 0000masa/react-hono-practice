@@ -34,6 +34,7 @@ resource "aws_lambda_function" "api" {
       S3_BUCKET             = aws_s3_bucket.image_bucket.id
       S3_REGION             = "ap-northeast-1"
       CLOUDFRONT_URL        = "https://${aws_cloudfront_distribution.image_cdn.domain_name}"
+      STORAGE_URL_BASE      = "https://${aws_cloudfront_distribution.image_cdn.domain_name}"
       SES_REGION            = "ap-northeast-1"
       MAIL_FROM             = "noreply@${aws_ses_domain_mail_from.main.mail_from_domain}"
       SQS_QUEUE_URL         = aws_sqs_queue.qrcode_generation.url
