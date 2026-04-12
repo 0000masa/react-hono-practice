@@ -7,7 +7,8 @@
 resource "aws_cloudwatch_event_rule" "daily_report" {
   name                = "${var.project_name}-daily-report"
   description         = "毎日 UTC 00:00（JST 09:00）に日次レポートバッチを実行"
-  schedule_expression = "cron(0 0 * * ? *)"
+  # TODO: テスト後に元に戻す → cron(0 0 * * ? *)
+  schedule_expression = "cron(30 6 * * ? *)"
 }
 
 # --- EventBridge ターゲット（Lambda） ---
