@@ -27,15 +27,19 @@ if (!env.DATABASE_USE_IAM_AUTH) {
  * 開発環境（IAM 認証無効）では即座に return する。
  */
 export async function initDatabase() {
+  console.log('[initDatabase] DATABASE_USE_IAM_AUTH:', env.DATABASE_USE_IAM_AUTH);
+  console.log('[initDatabase] db already set:', !!db);
   if (db) return;
 
   const { Signer } = await import('@aws-sdk/rds-signer');
+  console.log('[initDatabase] Signer imported successfully');
   const signer = new Signer({
     hostname: env.DATABASE_HOST,
     port: env.DATABASE_PORT,
     username: env.DATABASE_USERNAME,
   });
   const token = await signer.getAuthToken();
+  console.log('[initDatabase] token type:', typeof token, 'length:', token?.length);
 
   pool = mysql.createPool({
     host: env.DATABASE_HOST,
