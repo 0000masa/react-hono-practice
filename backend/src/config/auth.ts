@@ -11,7 +11,7 @@ export const auth = betterAuth({
     usePlural: true,
   }),
   secret: env.BETTER_AUTH_SECRET,
-  baseURL: env.isProduction ? undefined : `http://localhost:${env.PORT}`,
+  baseURL: env.FRONTEND_URL,
   basePath: '/api/auth',
   socialProviders: {
     google: {
