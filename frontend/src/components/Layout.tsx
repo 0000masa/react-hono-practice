@@ -25,7 +25,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           <div className="flex justify-between h-16">
             <div className="flex items-center space-x-4">
               <h1 className="text-xl font-semibold text-gray-900">
-                AWS ECSデプロイ練習
+                デプロイ練習アプリ
               </h1>
               <div className="flex items-center space-x-2">
                 <NavLink to="/dashboard" className={navLinkClass}>
