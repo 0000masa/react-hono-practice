@@ -37,7 +37,7 @@ resource "aws_secretsmanager_secret_version" "rds_credentials" {
 # RDS Proxy 側の設定変更は不要。
 resource "aws_secretsmanager_secret_rotation" "rds_credentials" {
   secret_id           = aws_secretsmanager_secret.rds_credentials.id
-  rotation_lambda_arn = "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-rds-rotation"
+  rotation_lambda_arn = "arn:aws:lambda:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-rds-rotation"
 
   rotation_rules {
     # 30 日ごとにパスワードをローテーション（AWS 推奨のデフォルト値）

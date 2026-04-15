@@ -225,7 +225,7 @@ resource "aws_serverlessapplicationrepository_cloudformation_stack" "rotation_la
   capabilities = ["CAPABILITY_IAM", "CAPABILITY_RESOURCE_POLICY"]
 
   parameters = {
-    endpoint            = "https://secretsmanager.${data.aws_region.current.name}.amazonaws.com"
+    endpoint            = "https://secretsmanager.${data.aws_region.current.id}.amazonaws.com"
     functionName        = "${var.project_name}-rds-rotation"
     vpcSubnetIds        = join(",", [local.private_subnet_a_id, local.private_subnet_c_id])
     vpcSecurityGroupIds = aws_security_group.rotation_lambda_sg.id
