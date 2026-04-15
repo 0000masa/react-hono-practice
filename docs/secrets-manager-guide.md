@@ -432,7 +432,69 @@ rotation_rules {
 
 ---
 
-## 8. 関連ファイル一覧
+## 8. コンソールからローテーション Lambda を手動作成する手順
+
+Terraform を使わずに AWS コンソールからローテーション Lambda を作成・設定する手順。手動管理を採用する場合や、動作確認のために手動で構築する場合に参照する。
+
+> **注意:** 以前は Secrets Manager のローテーション設定画面から「新しい Lambda 関数を作成」を選択して一括作成できたが、現在はコンソール UI の変更により利用できなくなっている。以下の SAR 経由の手順で作成する。
+
+### Step 1: SAR からローテーション Lambda をデプロイ
+
+1. **AWS Lambda** コンソールを開く → **「関数の作成」** をクリック
+2. **「Serverless Application Repository の参照」** を選択
+3. **「パブリックアプリケーション」** タブで **「すべてのアプリケーションの表示」** にチェックを入れる
+4. 検索バーで **`SecretsManagerRDSMySQLRotationSingleUser`** を検索してクリック
+5. **「アプリケーションの設定」** で以下を入力:
+
+   | パラメータ | 値 |
+   |---|---|
+   | **アプリケーション名** | `{project_name}-rds-rotation` |
+   | **endpoint** | `https://secretsmanager.{リージョン}.amazonaws.com` |
+   | **functionName** | `{project_name}-rds-rotation` |
+   | **vpcSubnetIds** | プライベートサブネット A, C の ID（カンマ区切り） |
+   | **vpcSecurityGroupIds** | ローテーション Lambda 用セキュリティグループの ID |
+
+6. **「IAM リソースのカスタム名〜を承認します」** にチェック → **「デプロイ」**
+
+これで CloudFormation スタックが作成され、Lambda 関数がデプロイされる。
+
+### Step 2: Lambda にリソースベースポリシーを追加
+
+Secrets Manager がローテーション Lambda を呼び出せるように、リソースベースポリシーを設定する。
+
+1. **Lambda** コンソール → 作成された `{project_name}-rds-rotation` 関数を開く
+2. **「設定」** タブ → **「アクセス権限」** → **「リソースベースのポリシーステートメント」** セクション → **「アクセス権限を追加」**
+3. 以下を設定:
+
+   | 項目 | 値 |
+   |---|---|
+   | **ステートメント ID** | `AllowSecretsManagerInvoke` |
+   | **プリンシパル** | `secretsmanager.amazonaws.com` |
+   | **アクション** | `lambda:InvokeFunction` |
+   | **ソース ARN** | 対象シークレットの ARN |
+
+### Step 3: Secrets Manager でローテーションを設定
+
+1. **Secrets Manager** コンソール → 対象のシークレット（`{project_name}/rds-credentials`）を開く
+2. **「ローテーション設定」** セクション → **「ローテーションを編集」** をクリック
+3. 以下を設定:
+   - **自動ローテーション**: オン
+   - **ローテーションスケジュール**: 30 日（セクション 6 参照）
+   - **ローテーション関数**: Step 1 で作成した `{project_name}-rds-rotation` を選択
+4. **「保存」** をクリック
+
+### セキュリティグループの事前準備
+
+Step 1 で指定するセキュリティグループは事前に作成しておく必要がある。以下の 2 つを設定する:
+
+- **ローテーション Lambda 用 SG**: egress を全開放（`0.0.0.0/0`）— NAT Gateway 経由で Secrets Manager API にアクセスするため
+- **RDS SG への ingress 追加**: ローテーション Lambda 用 SG からの Port 3306 を許可
+
+詳細はセクション 5.4 を参照。
+
+---
+
+## 9. 関連ファイル一覧
 
 | ファイル | 役割 |
 |---|---|
