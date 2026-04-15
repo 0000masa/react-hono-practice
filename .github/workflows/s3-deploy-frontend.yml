@@ -39,8 +39,8 @@ jobs:
       # SSMから最新のIDを取得して環境変数に入れる
       - name: Get Network Configuration from SSM
         run: |
-          BUCKET_NAME=$(aws ssm get-parameter --name "/kum/${{ inputs.target_env }}/frontend_bucket_name" --query "Parameter.Value" --output text)
-          DISTRIBUTION_ID=$(aws ssm get-parameter --name "/kum/${{ inputs.target_env }}/cloudfront_distribution_id" --query "Parameter.Value" --output text)
+          BUCKET_NAME=$(aws ssm get-parameter --name "/practice/${{ inputs.target_env }}/frontend_bucket_name" --query "Parameter.Value" --output text)
+          DISTRIBUTION_ID=$(aws ssm get-parameter --name "/practice/${{ inputs.target_env }}/cloudfront_distribution_id" --query "Parameter.Value" --output text)
 
           echo "BUCKET_NAME=$BUCKET_NAME" >> $GITHUB_ENV
           echo "DISTRIBUTION_ID=$DISTRIBUTION_ID" >> $GITHUB_ENV

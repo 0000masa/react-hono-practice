@@ -60,13 +60,13 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       # 環境ごとの project_name を設定
-      # stg → kum-stg, prod → kum-prod
+      # stg → practice-stg, prod → practice-prod
       - name: Resolve project name
         run: |
           if [ "${{ inputs.target_env }}" = "prod" ]; then
-            echo "PROJECT_NAME=kum-prod" >> $GITHUB_ENV
+            echo "PROJECT_NAME=practice-prod" >> $GITHUB_ENV
           else
-            echo "PROJECT_NAME=kum-stg" >> $GITHUB_ENV
+            echo "PROJECT_NAME=practice-stg" >> $GITHUB_ENV
           fi
 
       # ECR イメージ URI を構築

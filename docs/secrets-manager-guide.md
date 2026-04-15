@@ -60,7 +60,7 @@ Secrets Manager はシークレットを削除すると、即座には消えず*
 Terraform 管理下で `terraform destroy` → `terraform apply` すると以下のエラーが発生する：
 
 ```
-Error: creating Secrets Manager Secret (kum-stg/rds-credentials):
+Error: creating Secrets Manager Secret (practice-stg/rds-credentials):
 InvalidRequestException: You can't create this secret because a secret
 with this name is already scheduled for deletion.
 ```
