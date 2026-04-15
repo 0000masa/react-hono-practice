@@ -1,0 +1,301 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" type="device">
+  <diagram id="terraform-architecture" name="AWS Architecture - practice-stg">
+    <mxGraphModel dx="1800" dy="1600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1920" pageHeight="1440">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ===== Title ===== -->
+        <mxCell id="2" value="AWS Architecture - practice-stg (ap-northeast-1)" style="text;html=1;fontSize=18;fontStyle=1;fillColor=none;strokeColor=none;fontColor=#232F3E;align=center;" vertex="1" parent="1">
+          <mxGeometry x="350" y="0" width="600" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Users / Internet ===== -->
+        <mxCell id="10" value="Users" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#232F3E;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.users;" vertex="1" parent="1">
+          <mxGeometry x="620" y="40" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Route 53 ===== -->
+        <mxCell id="20" value="Route 53&lt;br&gt;mylabinfra.com" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#8C4FFF;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.route_53;" vertex="1" parent="1">
+          <mxGeometry x="620" y="160" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===== CloudFront ===== -->
+        <mxCell id="30" value="CloudFront&lt;br&gt;(Frontend)" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#8C4FFF;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.cloudfront;" vertex="1" parent="1">
+          <mxGeometry x="500" y="300" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="31" value="CloudFront&lt;br&gt;(Image)" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#8C4FFF;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.cloudfront;" vertex="1" parent="1">
+          <mxGeometry x="750" y="300" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===== WAF ===== -->
+        <mxCell id="32" value="WAF" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#DD344C;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.waf;" vertex="1" parent="1">
+          <mxGeometry x="340" y="300" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===== ACM ===== -->
+        <mxCell id="33" value="ACM" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#DD344C;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.certificate_manager;" vertex="1" parent="1">
+          <mxGeometry x="340" y="420" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===== API Gateway ===== -->
+        <mxCell id="40" value="API Gateway&lt;br&gt;(REST)" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#8C4FFF;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.api_gateway;" vertex="1" parent="1">
+          <mxGeometry x="500" y="420" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===== S3 Buckets ===== -->
+        <mxCell id="90" value="S3&lt;br&gt;Frontend Bucket" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#3F8624;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.s3;" vertex="1" parent="1">
+          <mxGeometry x="1250" y="240" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="91" value="S3&lt;br&gt;Image Bucket" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#3F8624;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.s3;" vertex="1" parent="1">
+          <mxGeometry x="1250" y="370" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===== VPC Container ===== -->
+        <mxCell id="50" value="VPC (192.168.0.0/20)" style="points=[[0,0],[0.25,0],[0.5,0],[0.75,0],[1,0],[1,0.25],[1,0.5],[1,0.75],[1,1],[0.75,1],[0.5,1],[0.25,1],[0,1],[0,0.75],[0,0.5],[0,0.25]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=13;fontStyle=1;container=1;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_vpc2;strokeColor=#8C4FFF;fillColor=none;verticalAlign=top;align=left;spacingLeft=30;fontColor=#232F3E;dashed=0;" vertex="1" parent="1">
+          <mxGeometry x="50" y="540" width="1080" height="830" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Public Subnet (inside VPC) ===== -->
+        <mxCell id="51" value="Public Subnets (192.168.3.0/24, 192.168.4.0/24)" style="points=[[0,0],[0.25,0],[0.5,0],[0.75,0],[1,0],[1,0.25],[1,0.5],[1,0.75],[1,1],[0.75,1],[0.5,1],[0.25,1],[0,1],[0,0.75],[0,0.5],[0,0.25]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=11;fontStyle=0;container=1;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_security_group;strokeColor=#7AA116;fillColor=#F2F6E8;verticalAlign=top;align=left;spacingLeft=30;fontColor=#232F3E;dashed=0;" vertex="1" parent="50">
+          <mxGeometry x="20" y="40" width="1040" height="130" as="geometry" />
+        </mxCell>
+
+        <!-- Internet Gateway -->
+        <mxCell id="60" value="Internet&lt;br&gt;Gateway" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#8C4FFF;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.internet_gateway;" vertex="1" parent="51">
+          <mxGeometry x="250" y="30" width="48" height="48" as="geometry" />
+        </mxCell>
+
+        <!-- NAT Gateway -->
+        <mxCell id="61" value="NAT&lt;br&gt;Gateway" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#8C4FFF;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.nat_gateway;" vertex="1" parent="51">
+          <mxGeometry x="650" y="30" width="48" height="48" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Private Subnet (inside VPC) ===== -->
+        <mxCell id="52" value="Private Subnets (192.168.1.0/24, 192.168.2.0/24)" style="points=[[0,0],[0.25,0],[0.5,0],[0.75,0],[1,0],[1,0.25],[1,0.5],[1,0.75],[1,1],[0.75,1],[0.5,1],[0.25,1],[0,1],[0,0.75],[0,0.5],[0,0.25]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=11;fontStyle=0;container=1;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_security_group;strokeColor=#147EBA;fillColor=#E6F2F8;verticalAlign=top;align=left;spacingLeft=30;fontColor=#232F3E;dashed=0;" vertex="1" parent="50">
+          <mxGeometry x="20" y="200" width="1040" height="610" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Lambda Functions (inside Private Subnet) ===== -->
+        <mxCell id="70" value="API Lambda&lt;br&gt;(Hono.js)" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#ED7100;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;" vertex="1" parent="52">
+          <mxGeometry x="100" y="50" width="48" height="48" as="geometry" />
+        </mxCell>
+
+        <mxCell id="71" value="SQS Worker&lt;br&gt;Lambda" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#ED7100;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;" vertex="1" parent="52">
+          <mxGeometry x="350" y="50" width="48" height="48" as="geometry" />
+        </mxCell>
+
+        <mxCell id="72" value="Migration&lt;br&gt;Lambda" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#ED7100;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;" vertex="1" parent="52">
+          <mxGeometry x="600" y="50" width="48" height="48" as="geometry" />
+        </mxCell>
+
+        <mxCell id="73" value="Daily Report&lt;br&gt;Lambda" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#ED7100;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;" vertex="1" parent="52">
+          <mxGeometry x="100" y="180" width="48" height="48" as="geometry" />
+        </mxCell>
+
+        <mxCell id="74" value="Notification&lt;br&gt;Lambda" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#ED7100;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;" vertex="1" parent="52">
+          <mxGeometry x="350" y="180" width="48" height="48" as="geometry" />
+        </mxCell>
+
+        <mxCell id="75" value="Secrets Rotation&lt;br&gt;Lambda" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#ED7100;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;" vertex="1" parent="52">
+          <mxGeometry x="600" y="180" width="48" height="48" as="geometry" />
+        </mxCell>
+
+        <!-- ===== RDS Proxy (inside Private Subnet) ===== -->
+        <mxCell id="80" value="RDS Proxy" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#C925D1;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.rds;" vertex="1" parent="52">
+          <mxGeometry x="350" y="360" width="48" height="48" as="geometry" />
+        </mxCell>
+
+        <!-- ===== RDS MySQL (inside Private Subnet) ===== -->
+        <mxCell id="81" value="RDS MySQL 8.4&lt;br&gt;(practice_db)" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#C925D1;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.rds;" vertex="1" parent="52">
+          <mxGeometry x="350" y="500" width="48" height="48" as="geometry" />
+        </mxCell>
+
+        <!-- ===== External Services (Right Column) ===== -->
+
+        <!-- SQS -->
+        <mxCell id="100" value="SQS&lt;br&gt;(QR Generation)" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#E7157B;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sqs;" vertex="1" parent="1">
+          <mxGeometry x="1250" y="560" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- SES -->
+        <mxCell id="101" value="SES&lt;br&gt;(Email)" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#E7157B;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.simple_email_service;" vertex="1" parent="1">
+          <mxGeometry x="1420" y="560" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- SNS -->
+        <mxCell id="102" value="SNS&lt;br&gt;(Alert Topic)" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#E7157B;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.sns;" vertex="1" parent="1">
+          <mxGeometry x="1250" y="710" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- EventBridge -->
+        <mxCell id="103" value="EventBridge&lt;br&gt;(Cron)" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#E7157B;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.eventbridge;" vertex="1" parent="1">
+          <mxGeometry x="1420" y="710" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- CloudWatch -->
+        <mxCell id="104" value="CloudWatch&lt;br&gt;(Logs / Alarms)" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#E7157B;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.cloudwatch;" vertex="1" parent="1">
+          <mxGeometry x="1250" y="860" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Secrets Manager -->
+        <mxCell id="105" value="Secrets&lt;br&gt;Manager" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#DD344C;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.secrets_manager;" vertex="1" parent="1">
+          <mxGeometry x="1420" y="860" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- SSM Parameter Store -->
+        <mxCell id="106" value="SSM&lt;br&gt;Parameter Store" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#E7157B;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.systems_manager;" vertex="1" parent="1">
+          <mxGeometry x="1250" y="1020" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ECR -->
+        <mxCell id="107" value="ECR" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#ED7100;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ecr;" vertex="1" parent="1">
+          <mxGeometry x="1420" y="1020" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Email Alert Target -->
+        <mxCell id="110" value="Email&lt;br&gt;Notification" style="outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#232F3E;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=11;fontStyle=0;aspect=fixed;pointerEvents=1;shape=mxgraph.aws4.users;" vertex="1" parent="1">
+          <mxGeometry x="1250" y="1180" width="60" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ========================================= -->
+        <!-- ===== Connections / Arrows ===== -->
+        <!-- ========================================= -->
+
+        <!-- Users → Route53 -->
+        <mxCell id="200" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#232F3E;strokeWidth=2;endArrow=block;endFill=1;rounded=1;" edge="1" source="10" target="20" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Route53 → CloudFront (Frontend) -->
+        <mxCell id="201" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#232F3E;strokeWidth=2;endArrow=block;endFill=1;rounded=1;" edge="1" source="20" target="30" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Route53 → CloudFront (Image) -->
+        <mxCell id="202" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#232F3E;strokeWidth=2;endArrow=block;endFill=1;rounded=1;" edge="1" source="20" target="31" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- WAF → CloudFront (Frontend) -->
+        <mxCell id="203" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#DD344C;strokeWidth=1;endArrow=block;endFill=1;dashed=1;rounded=1;" edge="1" source="32" target="30" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ACM → CloudFront (Frontend) -->
+        <mxCell id="204" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#DD344C;strokeWidth=1;endArrow=block;endFill=1;dashed=1;rounded=1;" edge="1" source="33" target="30" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- CloudFront (Frontend) → S3 Frontend (OAC) -->
+        <mxCell id="205" value="OAC" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#3F8624;strokeWidth=1;endArrow=block;endFill=1;rounded=1;fontSize=10;fontColor=#3F8624;" edge="1" source="30" target="90" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- CloudFront (Frontend) → API Gateway (/api/*) -->
+        <mxCell id="206" value="/api/*" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#8C4FFF;strokeWidth=2;endArrow=block;endFill=1;rounded=1;fontSize=10;fontColor=#8C4FFF;" edge="1" source="30" target="40" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- CloudFront (Image) → S3 Image (OAC) -->
+        <mxCell id="207" value="OAC" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#3F8624;strokeWidth=1;endArrow=block;endFill=1;rounded=1;fontSize=10;fontColor=#3F8624;" edge="1" source="31" target="91" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- API Gateway → API Lambda (Proxy Integration) -->
+        <mxCell id="208" value="Proxy" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#232F3E;strokeWidth=2;endArrow=block;endFill=1;rounded=1;fontSize=10;fontColor=#232F3E;" edge="1" source="40" target="70" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- API Lambda → RDS Proxy -->
+        <mxCell id="209" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#C925D1;strokeWidth=1;endArrow=block;endFill=1;rounded=1;" edge="1" source="70" target="80" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- RDS Proxy → RDS MySQL -->
+        <mxCell id="210" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#C925D1;strokeWidth=2;endArrow=block;endFill=1;rounded=1;" edge="1" source="80" target="81" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- API Lambda → SQS (QR Generation Job) -->
+        <mxCell id="211" value="QR Job" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#E7157B;strokeWidth=1;endArrow=block;endFill=1;rounded=1;fontSize=10;fontColor=#E7157B;" edge="1" source="70" target="100" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- SQS → SQS Worker Lambda (Trigger) -->
+        <mxCell id="212" value="Trigger" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#E7157B;strokeWidth=1;endArrow=block;endFill=1;rounded=1;fontSize=10;fontColor=#E7157B;" edge="1" source="100" target="71" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- SQS Worker → RDS Proxy -->
+        <mxCell id="213" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#C925D1;strokeWidth=1;endArrow=block;endFill=1;rounded=1;" edge="1" source="71" target="80" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- SQS Worker → S3 Image (QR Images) -->
+        <mxCell id="214" value="QR Images" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#3F8624;strokeWidth=1;endArrow=block;endFill=1;rounded=1;fontSize=10;fontColor=#3F8624;" edge="1" source="71" target="91" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- API Lambda → SES (Email) -->
+        <mxCell id="215" value="Email" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#E7157B;strokeWidth=1;endArrow=block;endFill=1;rounded=1;fontSize=10;fontColor=#E7157B;" edge="1" source="70" target="101" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- EventBridge → Daily Report Lambda (Cron) -->
+        <mxCell id="216" value="Cron" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#E7157B;strokeWidth=1;endArrow=block;endFill=1;rounded=1;fontSize=10;fontColor=#E7157B;" edge="1" source="103" target="73" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Daily Report → RDS Proxy -->
+        <mxCell id="217" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#C925D1;strokeWidth=1;endArrow=block;endFill=1;rounded=1;" edge="1" source="73" target="80" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Daily Report → SES (Reports) -->
+        <mxCell id="218" value="Reports" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#E7157B;strokeWidth=1;endArrow=block;endFill=1;rounded=1;fontSize=10;fontColor=#E7157B;" edge="1" source="73" target="101" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- CloudWatch → Notification Lambda (Error Filter) -->
+        <mxCell id="219" value="Error Filter" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#E7157B;strokeWidth=1;endArrow=block;endFill=1;rounded=1;fontSize=10;fontColor=#E7157B;" edge="1" source="104" target="74" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Notification Lambda → SES (Alert Email) -->
+        <mxCell id="220" value="Alert" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#E7157B;strokeWidth=1;endArrow=block;endFill=1;rounded=1;fontSize=10;fontColor=#E7157B;" edge="1" source="74" target="101" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Secrets Manager → Rotation Lambda (30-day) -->
+        <mxCell id="221" value="30-day Rotation" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#DD344C;strokeWidth=1;endArrow=block;endFill=1;rounded=1;fontSize=10;fontColor=#DD344C;" edge="1" source="105" target="75" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Rotation Lambda → RDS MySQL -->
+        <mxCell id="222" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#DD344C;strokeWidth=1;endArrow=block;endFill=1;rounded=1;" edge="1" source="75" target="81" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- CloudWatch → SNS (Alarms) -->
+        <mxCell id="223" value="Alarms" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#E7157B;strokeWidth=1;endArrow=block;endFill=1;rounded=1;fontSize=10;fontColor=#E7157B;" edge="1" source="104" target="102" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- SNS → Email Notification -->
+        <mxCell id="224" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#E7157B;strokeWidth=1;endArrow=block;endFill=1;rounded=1;" edge="1" source="102" target="110" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Migration Lambda → RDS Proxy -->
+        <mxCell id="225" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#C925D1;strokeWidth=1;endArrow=block;endFill=1;rounded=1;" edge="1" source="72" target="80" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
