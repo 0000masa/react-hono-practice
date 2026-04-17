@@ -136,6 +136,35 @@ module "rds_enhanced_monitoring_role" {
 }
 
 # ==============================================================================
+# 踏み台 EC2 用 IAM ロール
+# Session Manager で接続するために AmazonSSMManagedInstanceCore のみ付与する。
+# RDS へは TCP 転送するだけで踏み台上で SQL を実行しないため、rds-db:connect 等は不要。
+# create_instance_profile = true で aws_iam_instance_profile を同時に作成する。
+# ==============================================================================
+
+module "bastion_role" {
+  source = "terraform-aws-modules/iam/aws//modules/iam-role"
+
+  name                    = "${var.project_name}-bastion-role"
+  use_name_prefix         = false
+  create_instance_profile = true
+
+  trust_policy_permissions = {
+    ec2 = {
+      actions = ["sts:AssumeRole"]
+      principals = [{
+        type        = "Service"
+        identifiers = ["ec2.amazonaws.com"]
+      }]
+    }
+  }
+
+  policies = {
+    AmazonSSMManagedInstanceCore = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+  }
+}
+
+# ==============================================================================
 # 通知 Lambda 用 IAM ロール（既存の通知Lambda用、変更なし）
 # ==============================================================================
 
