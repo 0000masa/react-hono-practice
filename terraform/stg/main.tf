@@ -13,8 +13,14 @@ module "app" {
   ecr_repository_name      = var.ecr_repository_name
   image_tag                = var.image_tag
 
-  rds_multi_az                = var.rds_multi_az
-  rds_backup_retention_period = var.rds_backup_retention_period
+  rds_multi_az                        = var.rds_multi_az
+  rds_backup_retention_period         = var.rds_backup_retention_period
+  rds_instance_class                  = var.rds_instance_class
+  rds_skip_final_snapshot             = var.rds_skip_final_snapshot
+  rds_apply_immediately               = var.rds_apply_immediately
+  rds_enabled_cloudwatch_logs_exports = var.rds_enabled_cloudwatch_logs_exports
+  rds_performance_insights_enabled    = var.rds_performance_insights_enabled
+  rds_monitoring_interval             = var.rds_monitoring_interval
 
   providers = {
     aws           = aws

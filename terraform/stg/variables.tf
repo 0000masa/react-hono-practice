@@ -66,3 +66,39 @@ variable "rds_backup_retention_period" {
   type        = number
   default     = 7
 }
+
+variable "rds_instance_class" {
+  description = "RDSインスタンスクラス"
+  type        = string
+  default     = "db.t4g.micro"
+}
+
+variable "rds_skip_final_snapshot" {
+  description = "DB削除時に最終スナップショットの取得をスキップするか"
+  type        = bool
+  default     = true
+}
+
+variable "rds_apply_immediately" {
+  description = "設定変更を即座に適用するか"
+  type        = bool
+  default     = true
+}
+
+variable "rds_enabled_cloudwatch_logs_exports" {
+  description = "CloudWatch Logsへエクスポートするログ種別"
+  type        = list(string)
+  default     = ["error"]
+}
+
+variable "rds_performance_insights_enabled" {
+  description = "Performance Insightsの有効化"
+  type        = bool
+  default     = false
+}
+
+variable "rds_monitoring_interval" {
+  description = "Enhanced Monitoringのメトリクス取得間隔（秒）"
+  type        = number
+  default     = 0
+}

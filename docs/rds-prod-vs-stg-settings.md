@@ -57,6 +57,85 @@ AWS 公式ドキュメント・AWS Well-Architected Framework・AWS Control Towe
 
 ---
 
+## 1.5. CloudWatch 関連3機能の料金（重要）
+
+`enabled_cloudwatch_logs_exports`、`performance_insights_enabled`、`monitoring_interval` はいずれも **ログ・メトリクスを CloudWatch に送る機能** であり、**有効化すると課金が発生する**（無料枠を超えた分）。以下は AWS 公式ドキュメントベースの実用的な目安。
+
+### ① Performance Insights — 通常運用は **完全無料**
+
+| プラン | 内容 | 料金 |
+|---|---|---|
+| **無料枠（デフォルト）** | 直近 **7日間** の性能データ履歴 + **100万 API リクエスト/月** | **$0** |
+| 有料（拡張保持） | 1〜24ヶ月の保持期間 | vCPU × 月数で課金 |
+
+**ポイント**:
+- デフォルトの7日保持なら **完全に無料**（[Performance Insights Pricing 公式](https://aws.amazon.com/rds/performance-insights/pricing/)）
+- 7日でも本番のトラブルシューティングには十分
+- ⚠️ 2026-06-30 以降、Performance Insights ダッシュボードと柔軟保持期間は廃止。CloudWatch Database Insights の Advanced mode に移行予定
+- このプロジェクトでは **デフォルト（7日無料）で本番有効化推奨**
+
+### ② Enhanced Monitoring — 月 **$1〜5/インスタンス** 程度
+
+CloudWatch Logs に OS メトリクスを送る方式。料金は CloudWatch Logs の従量課金に準ずる。
+
+| 取得間隔 | 1日のログ量（目安） | 月コスト目安（Tokyo, 1インスタンス） |
+|---|---|---|
+| `60` 秒 | 約 1〜2 MB | **約 $0〜2/月**（無料枠内に収まることが多い） |
+| `15` 秒 | 約 5〜8 MB | 約 $2〜5/月 |
+| `1` 秒 | 約 60〜100 MB | 約 $20〜50/月 |
+
+**料金の構造**（[Enhanced Monitoring 公式](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_Monitoring.OS.html)）:
+- データはCloudWatch Logsに保存され、**CloudWatch Logsの料金（取り込み + 保存）が適用**
+- CloudWatch Logs 無料枠: **5 GB/月の取り込み**
+- 有料: **約 $0.76/GB 取り込み + $0.033/GB/月 保存**（Tokyo）
+- インターバルが短いほど比例してログ量増加
+- デフォルト保持30日（CloudWatch Logsで変更可能）
+- 加えて、Enhanced Monitoring 用の **IAM ロール** が必要（料金はかからない）
+
+**推奨**: 本番で `60` 秒間隔なら無料枠内に収まる可能性が高く、コスパが良い。
+
+### ③ `enabled_cloudwatch_logs_exports`（DBログのCloudWatch転送）— 月 **$0〜数十ドル**
+
+DBエンジンのログを CloudWatch Logs に転送する機能。送るログの種類と量で料金が決まる。
+
+| ログ種別 | 月のログ量目安 | 月コスト目安（Tokyo） |
+|---|---|---|
+| `error` | 数MB〜数十MB | **ほぼ無料**（無料枠内） |
+| `slowquery` | 数十MB〜数GB（クエリ次第） | $0〜数ドル |
+| `general` | 数GB〜数十GB（**全クエリ記録**） | **$5〜数十ドル** |
+| `audit` | 数GB（ログプラグイン要） | $5〜数十ドル |
+
+**料金**（CloudWatch Logs 共通）:
+- 無料枠: 月 **5 GB の取り込み**
+- 取り込み課金: **約 $0.76/GB**（Tokyo、Vended Logs は安い場合あり）
+- 保存課金: **約 $0.033/GB/月**
+
+**注意**:
+- `general` は全クエリを記録するため **本番で常時ONにすると激しく課金される**。短期調査用に推奨
+- `audit` も同様に容量大。コンプライアンス要件がある場合のみ有効化
+- `error` と `slowquery` は容量が小さく、コストはほぼ問題にならない
+
+### CloudWatch関連機能の合計コスト試算（本番、`db.t4g.medium` × Multi-AZ）
+
+| 機能 | 設定 | 月コスト |
+|---|---|---|
+| Performance Insights | 有効（7日無料枠） | **$0** |
+| Enhanced Monitoring | `monitoring_interval = 60` | **約 $0〜2** |
+| `enabled_cloudwatch_logs_exports` | `["error", "slowquery"]` | **約 $0〜3** |
+| **合計** | | **約 $0〜5/月** |
+
+**結論**: 本番で3機能とも有効化しても、適切な設定（60秒間隔・errorとslowqueryのみ）なら **月 $5 以下** に収まる。観測性のメリットを考えれば極めてコスパが良い。
+
+### ステージングでは無効が妥当
+
+| 機能 | ステージング推奨 | 理由 |
+|---|---|---|
+| Performance Insights | `false` | 検証環境で性能トラブル分析の必要性は低い |
+| Enhanced Monitoring | `0`（無効） | CloudWatch標準メトリクスで十分 |
+| `enabled_cloudwatch_logs_exports` | `["error"]` のみ | エラーログだけで運用に支障なし |
+
+---
+
 ## 2. 各設定項目の詳細
 
 ### 2-1. `multi_az`（Multi-AZ 配置）
@@ -199,37 +278,68 @@ AWS Control Tower / Security Hub いずれも本番DBには **必須コントロ
 
 ## 3. 推奨 Terraform 構成
 
-### 3-1. 環境別変数の追加（実装済）
+### 3-1. 環境別変数（実装済）
 
-`modules/app-infrastructure/variables.tf`:
+`modules/app-infrastructure/variables.tf` に以下8つの変数を定義済み：
 
 ```hcl
 variable "rds_multi_az" {
-  description = "RDSをMulti-AZ構成にするかどうか（本番true推奨）"
-  type        = bool
-  default     = false
+  type    = bool
+  default = false
 }
 
 variable "rds_backup_retention_period" {
-  description = "RDS自動バックアップの保持日数（0〜35）"
-  type        = number
-  default     = 7
+  type    = number
+  default = 7
+}
 
-  validation {
-    condition     = var.rds_backup_retention_period >= 0 && var.rds_backup_retention_period <= 35
-    error_message = "backup_retention_period は 0〜35 の範囲で指定してください。"
-  }
+variable "rds_instance_class" {
+  type    = string
+  default = "db.t4g.micro"
+}
+
+variable "rds_skip_final_snapshot" {
+  type    = bool
+  default = true
+}
+
+variable "rds_apply_immediately" {
+  type    = bool
+  default = true
+}
+
+variable "rds_enabled_cloudwatch_logs_exports" {
+  type    = list(string)
+  default = ["error"]
+}
+
+variable "rds_performance_insights_enabled" {
+  type    = bool
+  default = false
+}
+
+variable "rds_monitoring_interval" {
+  type    = number
+  default = 0
 }
 ```
 
-### 3-2. ステージング環境の設定値
+`monitoring_interval > 0` の場合は Enhanced Monitoring 用の IAM ロール（`AmazonRDSEnhancedMonitoringRole` 付与）も自動作成される。
+
+### 3-2. ステージング環境の設定値（実装済）
 
 `stg/terraform.tfvars`:
 
 ```hcl
 # --- RDS（ステージング設定） ---
-rds_multi_az                = false
-rds_backup_retention_period = 3
+rds_multi_az                        = false
+rds_backup_retention_period         = 3
+rds_instance_class                  = "db.t4g.micro"
+rds_skip_final_snapshot             = true
+rds_apply_immediately               = true
+rds_enabled_cloudwatch_logs_exports = ["error"]
+rds_performance_insights_enabled    = false
+rds_monitoring_interval             = 0
 ```
 
 ### 3-3. 本番環境を追加する場合（将来的な拡張）
@@ -238,18 +348,19 @@ rds_backup_retention_period = 3
 
 ```hcl
 # --- RDS（本番設定） ---
-rds_multi_az                = true
-rds_backup_retention_period = 14
-# 以下は将来 variables.tf に追加すべき項目
-# rds_instance_class            = "db.m6g.large"
-# rds_allocated_storage         = 100
-# rds_max_allocated_storage     = 500
-# rds_deletion_protection       = true
-# rds_skip_final_snapshot       = false
-# rds_apply_immediately         = false
-# rds_performance_insights      = true
-# rds_monitoring_interval       = 60
-# rds_cloudwatch_logs_exports   = ["error", "slowquery"]
+rds_multi_az                        = true
+rds_backup_retention_period         = 14
+rds_instance_class                  = "db.m6g.large"
+rds_skip_final_snapshot             = false  # 別途 final_snapshot_identifier の指定も必要
+rds_apply_immediately               = false
+rds_enabled_cloudwatch_logs_exports = ["error", "slowquery"]
+rds_performance_insights_enabled    = true   # 7日無料枠で十分
+rds_monitoring_interval             = 60     # 60秒間隔ならコストは月数ドル
+
+# 以下はまだ変数化されていない項目（将来 variables.tf に追加すべき）
+# rds_allocated_storage     = 100
+# rds_max_allocated_storage = 500
+# rds_deletion_protection   = true
 ```
 
 ---
@@ -309,8 +420,16 @@ rds_backup_retention_period = 14
 
 1. ✅ `multi_az` を変数化（実装済）
 2. ✅ `backup_retention_period` を変数化（実装済）
-3. ⏳ 本番環境用ディレクトリ（`terraform/prod/`）の追加
-4. ⏳ `deletion_protection`、`instance_class`、`performance_insights_enabled` 等の追加変数化
-5. ⏳ CloudWatch アラーム（CPU、接続数、ストレージ残量、レプリカラグ）の設定
+3. ✅ `instance_class` を変数化（実装済）
+4. ✅ `skip_final_snapshot` を変数化（実装済）
+5. ✅ `apply_immediately` を変数化（実装済）
+6. ✅ `enabled_cloudwatch_logs_exports` を変数化（実装済）
+7. ✅ `performance_insights_enabled` を変数化（実装済、Enhanced Monitoring 用 IAM ロールも自動作成）
+8. ✅ `monitoring_interval` を変数化（実装済）
+9. ⏳ 本番環境用ディレクトリ（`terraform/prod/`）の追加
+10. ⏳ `deletion_protection`、`allocated_storage`、`max_allocated_storage` の追加変数化
+11. ⏳ CloudWatch アラーム（CPU、接続数、ストレージ残量、レプリカラグ）の設定
 
 ステージングは現状のままコスト最適化を維持し、本番ではこのドキュメントの推奨値を適用することで、可用性・コストのバランスが取れた RDS 運用が可能になる。
+
+特に CloudWatch 関連の3機能（Performance Insights / Enhanced Monitoring / Logs Exports）は、適切に設定すれば **本番でも月 $5 以下** で観測性を大幅に向上できる、コスパの良い投資である。

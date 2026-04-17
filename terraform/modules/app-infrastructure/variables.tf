@@ -71,3 +71,44 @@ variable "rds_backup_retention_period" {
     error_message = "backup_retention_period は 0〜35 の範囲で指定してください。"
   }
 }
+
+variable "rds_instance_class" {
+  description = "RDSインスタンスクラス（例: db.t4g.micro, db.t4g.medium, db.m6g.large）"
+  type        = string
+  default     = "db.t4g.micro"
+}
+
+variable "rds_skip_final_snapshot" {
+  description = "DB削除時に最終スナップショットの取得をスキップするか。本番はfalse推奨"
+  type        = bool
+  default     = true
+}
+
+variable "rds_apply_immediately" {
+  description = "設定変更を即座に適用するか。本番はfalse推奨（メンテナンスウィンドウまで待つ）"
+  type        = bool
+  default     = true
+}
+
+variable "rds_enabled_cloudwatch_logs_exports" {
+  description = "CloudWatch Logsへエクスポートするログ種別（error/slowquery/general/audit）"
+  type        = list(string)
+  default     = ["error"]
+}
+
+variable "rds_performance_insights_enabled" {
+  description = "Performance Insightsの有効化。直近7日間は無料"
+  type        = bool
+  default     = false
+}
+
+variable "rds_monitoring_interval" {
+  description = "Enhanced Monitoringのメトリクス取得間隔（秒）。0/1/5/10/15/30/60。0で無効"
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = contains([0, 1, 5, 10, 15, 30, 60], var.rds_monitoring_interval)
+    error_message = "monitoring_interval は 0/1/5/10/15/30/60 のいずれかを指定してください。"
+  }
+}
