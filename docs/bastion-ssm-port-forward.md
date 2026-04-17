@@ -241,6 +241,103 @@ INSTANCE_ID=<i-xxxxxxxxxxxxxxxxx>   RDS_ENDPOINT=<practice-stg-db.xxxxx.ap-north
 4. `mysql` を前景で起動、パスワードプロンプトに 2.c のパスワードを貼る
 5. `mysql` を `exit` で抜けると、`trap` が発動してポートフォワーディングも自動で終了
 
+#### `trap "kill $SSM_PID" EXIT` の仕組み
+
+`trap` は bash の組み込みコマンドで、**指定したシグナルを受け取ったときに実行するコマンドを事前に登録しておく**ための機能。
+
+##### 構文
+
+```bash
+trap  COMMAND  SIGNAL [SIGNAL ...]
+#     ^^^^^^^  ^^^^^^^^^^^^^^^^^^^^
+#     実行する  受け取るシグナル(複数可)
+```
+
+- `COMMAND` は **1 つの引数として渡す** 必要があるため、スペースを含む場合は必ずクォートで囲む。
+- `SIGNAL` は名前 (`INT`, `TERM`) でも番号 (`2`, `15`) でも、`SIG` プレフィックス付き (`SIGINT`) でも指定できる。
+- 複数シグナルを列挙するとそれら全てに対して同じコマンドが登録される。
+
+よく使う書き方:
+
+```bash
+# 1 つのシグナルだけ捕まえる
+trap "echo bye" EXIT
+
+# 複数まとめて登録
+trap "cleanup" INT TERM HUP EXIT
+
+# Ctrl+C を無視する（空文字列 = 「何もしない」ハンドラ）
+trap "" INT
+
+# 登録を解除して元に戻す
+trap - INT
+```
+
+注意: クォートを忘れるとコマンドの途中までが `COMMAND`、残りが `SIGNAL` として解釈されて壊れる。
+
+```bash
+# ✅ 正しい（"kill $SSM_PID 2>/dev/null" が 1 引数として渡る）
+trap "kill $SSM_PID 2>/dev/null" EXIT
+
+# ❌ 間違い（kill がコマンド、$SSM_PID 以降がシグナル扱いになる）
+trap kill $SSM_PID EXIT
+```
+
+`EXIT` と `ERR` は bash 独自の擬似シグナルで、OS シグナルとしては存在しない（シェルが内部でハンドリングする）。
+
+```bash
+SSM_PID=$!                                # 直前にバックグラウンド起動した aws ssm のプロセス ID を取得
+trap "kill $SSM_PID 2>/dev/null" EXIT     # シェル(またはサブシェル)が終了する瞬間に kill $SSM_PID を実行
+```
+
+各部品の役割:
+
+| 要素 | 意味 |
+|---|---|
+| `$!` | 直前に `&` でバックグラウンド起動したプロセスの PID を取得する特殊変数 |
+| `SSM_PID=$!` | その PID を変数に保存しておく（後から `kill` に渡すため） |
+| `EXIT` | bash の特殊な「擬似シグナル」。**シェル/スクリプトがどんな理由で終わっても** 発火する |
+| `kill $SSM_PID` | 保存した PID に SIGTERM（デフォルト）を送って終了させる |
+| `2>/dev/null` | プロセスが既に死んでいた場合の `kill: No such process` エラーを握り潰す |
+
+**`EXIT` 擬似シグナルは具体的に以下を全て拾う:**
+
+- スクリプトが最後まで走りきって正常終了 (`exit 0`)
+- `set -e` で途中の失敗により異常終了 (`exit 1`)
+- ユーザーが Ctrl+C を押した（SIGINT）
+- ターミナルを閉じた（SIGHUP）
+- `kill <script_pid>` で外部から止められた（SIGTERM）
+- `return` でサブシェルを抜けた
+
+**拾えない唯一の例外が `SIGKILL` (`kill -9`)。** SIGKILL はプロセスに通知せず即座に OS が殺すため、trap ハンドラを走らせる猶予がない。
+
+**なぜこれが必要か:**
+
+`aws ssm start-session ... &` で起動したプロセスはシェルと独立して動く。もし trap を入れずに Ctrl+C で抜けると、親シェルだけが死んで SSM プロセスは**孤児（orphan）として残り続ける**。結果:
+
+- ローカルの 13306 ポートが掴まれたままで次回の接続が失敗する
+- `ps aux | grep ssm` に古いセッションが溜まっていく
+- AWS 側のセッション枠も消費し続ける
+
+trap で `EXIT` にクリーンアップを登録しておけば、**正常終了・異常終了・割り込み、どの経路で抜けても必ず `kill $SSM_PID` が実行される**。他言語の try/finally や Go の `defer`, C++ の RAII と同じ「後始末保証」のパターン。
+
+**動作イメージ:**
+
+```
+[シェル起動]
+   │
+   ├─ aws ssm ... &        ← バックグラウンド起動 (PID=12345)
+   ├─ SSM_PID=12345
+   ├─ trap "kill 12345" EXIT  ← ハンドラ登録(まだ発火しない)
+   ├─ mysql ...            ← ユーザーが SQL を叩く
+   │       │
+   │   ユーザー Ctrl+D / exit / Ctrl+C / エラー
+   │       ▼
+   └─ [シェル終了直前] trap EXIT が発火 → kill 12345 が走る
+                                          ↓
+                                     SSM プロセス停止
+```
+
 接続後は普通に SQL を叩ける。
 
 ```sql
