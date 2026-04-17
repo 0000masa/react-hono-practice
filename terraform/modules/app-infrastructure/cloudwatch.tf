@@ -42,6 +42,27 @@ resource "aws_cloudwatch_log_subscription_filter" "lambda_error_to_notification"
   # "ERROR" または "CRITICAL" のものだけを通知 Lambda に流す。
   # 単純な文字列マッチ（?ERROR ?CRITICAL）だと、ライブラリ出力の
   # "ERROR" 文字列等で誤検知するため JSON フィルタで厳密に絞り込む。
+  #
+  # --- JSON フィルタ構文の読み方 ---
+  #   {  ... }   : CloudWatch Logs の JSON フィルタ式であることを示す括弧。
+  #                これに対して ?ERROR ?CRITICAL のようにクエスチョンが先頭に付くものは
+  #                テキストベースのフィルタ（term マッチ）で、JSON 構造を見ない。
+  #   $          : ログイベント本文（JSON）のルートオブジェクトを指すセレクタ。
+  #                JSONPath の記法に由来する。
+  #   $.level    : ルートの "level" プロパティ。例えばログが
+  #                { "level": "ERROR", "message": "..." } なら $.level = "ERROR"。
+  #                ネストしていれば $.error.message のように . で辿れる。
+  #   =          : 文字列の等価比較（大文字小文字を区別する）。数値比較は =, != のほか
+  #                <, <=, >, >= も使える。ワイルドカード部分一致は = "*foo*" と書く。
+  #   ||         : 論理 OR。両条件のどちらかを満たせばマッチ。論理 AND は &&。
+  #   \"ERROR\"  : Terraform 文字列内のダブルクォートをバックスラッシュでエスケープ。
+  #                フィルタ式自体は "ERROR" という JSON 文字列リテラルを渡したい。
+  #
+  # --- 動作 ---
+  #   ログイベント本文が JSON としてパース可能で、かつ level プロパティが
+  #   "ERROR" または "CRITICAL" の完全一致なら通知 Lambda を起動する。
+  #   JSON としてパースできないログや level が他の値のログはマッチしない
+  #   （= 誤検知しない）。
   filter_pattern  = "{ $.level = \"ERROR\" || $.level = \"CRITICAL\" }"
   destination_arn = aws_lambda_function.notification_function.arn
 
