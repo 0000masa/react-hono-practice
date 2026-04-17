@@ -27,7 +27,7 @@ resource "aws_instance" "bastion" {
   vpc_security_group_ids      = [aws_security_group.bastion_sg.id]
   associate_public_ip_address = false
 
-  iam_instance_profile = module.bastion_role.iam_instance_profile_name
+  iam_instance_profile = module.bastion_role.instance_profile_name
 
   # IMDSv2 強制
   metadata_options {
