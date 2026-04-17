@@ -45,6 +45,8 @@ Docker Compose で 5 つのサービスを起動します。
 
 ### AWS 本番環境
 
+![AWS アーキテクチャ](terraform/architecture/architecture-manual.png)
+
 ```
 Client
   └─▶ CloudFront (WAF)
@@ -59,7 +61,7 @@ EventBridge (cron: 毎日 JST 9:00)
   └─▶ Daily Report Lambda ──▶ SES (メール送信)
 ```
 
-> 詳細なアーキテクチャ図: [`terraform/architecture-by-claudecode.drawio`](terraform/architecture-by-claudecode.drawio)
+> drawio 版（ClaudeCode 生成）: [`terraform/architecture/architecture-by-claudecode.drawio`](terraform/architecture/architecture-by-claudecode.drawio)
 
 ## セットアップ
 
