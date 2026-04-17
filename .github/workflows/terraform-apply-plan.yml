@@ -1,6 +1,15 @@
 on:
   workflow_dispatch:
     inputs:
+      action:
+        description: "実行アクション (plan はどのブランチでも可。apply はブランチ制約あり)"
+        type: choice
+        options:
+          - plan
+          - apply
+        required: true
+        default: plan
+
       target_env:
         description: "デプロイ先環境"
         type: choice
@@ -22,7 +31,7 @@ env:
   AWS_REGION: ap-northeast-1
 
 jobs:
-  apply:
+  terraform:
     runs-on: ubuntu-latest
     environment: ${{ inputs.target_env }}
 
@@ -49,11 +58,13 @@ jobs:
           # ここに providers.tf と同じバージョンを指定します
           terraform_version: "1.14.3"
 
+      # apply 時のみブランチ制約を適用
       # stgの場合は main か develop のブランチで実行できる
       # prodの場合は main ブランチでしか実行できない
+      # plan はどのブランチでも実行できる
       - name: Fail on forbidden branch
         if: |
-          !(
+          inputs.action == 'apply' && !(
             (inputs.target_env == 'prod' && github.ref == 'refs/heads/main') ||
             (inputs.target_env == 'stg'  && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'))
           )
@@ -90,6 +101,7 @@ jobs:
             -var="enable_nat_gateway=${{ env.IS_ENABLE_NAT_GATEWAY }}"
 
       - name: Terraform Apply
+        if: inputs.action == 'apply'
         run: |
           terraform apply -auto-approve -input=false \
             -var="enable_nat_gateway=${{ env.IS_ENABLE_NAT_GATEWAY }}"

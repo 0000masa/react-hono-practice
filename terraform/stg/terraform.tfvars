@@ -5,7 +5,7 @@ db_name                  = "practice_db"
 db_username              = "admin"
 parameter_store_path     = "/practice/stg/"
 ecr_repository_name      = "react-hono-practice-backend-lambda"
-image_tag                = "sha-9bfdc0ba89d78c6c6486057857b885ecb1c802ee"
+image_tag                = "sha-f25851a936be60b7727ed04ef30390a19cbc36f5"
 alert_email_to           = "mousetest12345@gmail.com"
 app_env                  = "staging"
 
