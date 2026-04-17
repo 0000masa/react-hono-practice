@@ -185,9 +185,20 @@ export AWS_REGION=ap-northeast-1
 
 ### c. DB マスターパスワード
 
-1. AWS Systems Manager → 「Parameter Store」
-2. `<parameter_store_path>db_password`（例: `/practice/stg/db_password`）を開く
-3. 「値を表示」をクリックしてコピー
+**Secrets Manager から取得する**（Parameter Store ではない）。
+
+1. AWS Secrets Manager → 「シークレット」
+2. `<project_name>/rds-credentials` を開く（例: `practice-stg/rds-credentials`）
+3. 「シークレットの値を取得する」をクリック
+4. JSON が表示されるので `password` の値をコピー
+   ```json
+   {
+     "username": "admin",
+     "password": "xxxxxxxxxxxxxxxxxxxxxxxxx"
+   }
+   ```
+
+> **なぜ Parameter Store ではなく Secrets Manager なのか**: このプロジェクトは RDS Proxy 用の認証情報を Secrets Manager に置いており、さらに 30 日ごとの自動パスワードローテーションを有効にしている（`secrets_manager.tf` / `docs/secrets-manager-guide.md`）。ローテーション Lambda は **Secrets Manager と RDS の実パスワードだけを更新し、SSM Parameter Store は初期値のまま取り残される**。そのため Parameter Store の値を使っても `Access denied for user` になる。RDS Proxy 経由の Lambda が参照するのと同じ Secrets Manager を参照するのが唯一正しい取得先。
 
 > **注意**: パスワードをシェル履歴に残さないこと。後述のコマンドではプロンプトに貼り付けるだけなので履歴には残らない。
 
@@ -344,7 +355,7 @@ An error occurred (TargetNotConnected) when calling the StartSession operation
 ### `ERROR 1045 (28000): Access denied for user`
 
 - パスワードが間違っている、もしくはユーザ名が違う。
-- 対処: Parameter Store から最新のパスワードを再コピー。ユーザ名は Terraform の `var.db_username` と一致させる。
+- 対処: **Secrets Manager の `<project_name>/rds-credentials`** から最新のパスワードを再コピー（Parameter Store の値はローテーション後に古くなっているので使わない）。ユーザ名は同じシークレット内の `username` フィールドを確認する。
 
 ### 接続するがすぐ切れる
 
