@@ -107,6 +107,35 @@ module "rotation_lambda_role" {
 }
 
 # ==============================================================================
+# RDS Enhanced Monitoring 用 IAM ロール
+# monitoring_interval > 0 のときだけ作成される
+# AWS提供のマネージドポリシー AmazonRDSEnhancedMonitoringRole を付与
+# ==============================================================================
+
+module "rds_enhanced_monitoring_role" {
+  source = "terraform-aws-modules/iam/aws//modules/iam-role"
+
+  create = var.rds_monitoring_interval > 0
+
+  name            = "${var.project_name}-rds-enhanced-monitoring"
+  use_name_prefix = false
+
+  trust_policy_permissions = {
+    rds_monitoring = {
+      actions = ["sts:AssumeRole"]
+      principals = [{
+        type        = "Service"
+        identifiers = ["monitoring.rds.amazonaws.com"]
+      }]
+    }
+  }
+
+  policies = {
+    AmazonRDSEnhancedMonitoringRole = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
+  }
+}
+
+# ==============================================================================
 # 通知 Lambda 用 IAM ロール（既存の通知Lambda用、変更なし）
 # ==============================================================================
 

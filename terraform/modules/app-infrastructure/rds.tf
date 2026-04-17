@@ -20,7 +20,7 @@ resource "aws_db_instance" "main" {
   copy_tags_to_snapshot           = true
   auto_minor_version_upgrade      = true
   enabled_cloudwatch_logs_exports = var.rds_enabled_cloudwatch_logs_exports
-  maintenance_window              = "sun:15:00-sun:15:30"
+  maintenance_window              = "sun:15:00-sun:15:30" # UTC。JST では 月曜 00:00-00:30（UTC+9）
 
   # Multi-AZ 構成（スタンバイDBを別AZに自動配置、障害時は1〜2分で自動フェイルオーバー）
   multi_az = var.rds_multi_az
@@ -34,7 +34,7 @@ resource "aws_db_instance" "main" {
 
   # Enhanced Monitoring（OS層メトリクスをCloudWatch Logsへ送信。0で無効）
   monitoring_interval = var.rds_monitoring_interval
-  monitoring_role_arn = var.rds_monitoring_interval > 0 ? aws_iam_role.rds_enhanced_monitoring[0].arn : null
+  monitoring_role_arn = var.rds_monitoring_interval > 0 ? module.rds_enhanced_monitoring_role.arn : null
 
   # DBの変更をすぐに反映させるか
   apply_immediately = var.rds_apply_immediately
@@ -44,29 +44,7 @@ resource "aws_db_instance" "main" {
   }
 }
 
-# Enhanced Monitoring 用 IAM ロール（monitoring_interval > 0 のときのみ作成）
-# AWS提供のマネージドポリシー AmazonRDSEnhancedMonitoringRole を使用
-resource "aws_iam_role" "rds_enhanced_monitoring" {
-  count = var.rds_monitoring_interval > 0 ? 1 : 0
-  name  = "${var.project_name}-rds-enhanced-monitoring"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Service = "monitoring.rds.amazonaws.com"
-      }
-      Action = "sts:AssumeRole"
-    }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "rds_enhanced_monitoring" {
-  count      = var.rds_monitoring_interval > 0 ? 1 : 0
-  role       = aws_iam_role.rds_enhanced_monitoring[0].name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
-}
+# Enhanced Monitoring 用 IAM ロールは iam_role.tf で定義（module.rds_enhanced_monitoring_role）
 
 #DBサブネットグループ
 resource "aws_db_subnet_group" "main" {

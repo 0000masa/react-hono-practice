@@ -236,6 +236,58 @@ AWS Control Tower / Security Hub いずれも本番DBには **必須コントロ
 - インターバルが短いほど課金が増える（`60` 秒なら月数ドル程度）
 - AWS Trusted Advisor の Operational Excellence チェック項目
 
+#### Enhanced Monitoring 用 IAM ロールについて
+
+Enhanced Monitoring を有効化（`monitoring_interval > 0`）するには、**RDS が CloudWatch Logs にメトリクスを書き込むための IAM ロール** を事前に作成し、`monitoring_role_arn` に指定する必要がある。
+
+**IAM ロールの作成方法による違い**:
+
+| 作成方法 | 自動作成 | 備考 |
+|---|---|---|
+| AWS マネジメントコンソール | ✅ あり | インスタンス作成画面で「Default」を選ぶと、コンソールが裏で `rds-monitoring-role` を自動生成して紐付ける |
+| Terraform / AWS CLI / API | ❌ なし | `monitoring_role_arn` に **明示的に IAM ロール ARN を渡す必要がある**。未指定だと `InvalidParameterValue` エラーになる |
+
+**IAM ロールの要件**:
+- **信頼ポリシー**: `monitoring.rds.amazonaws.com` が `sts:AssumeRole` 可能であること
+- **アタッチするポリシー**: AWS マネージドポリシー `arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole`（書き込み先 CloudWatch Logs グループへの権限が含まれる）
+- **料金**: IAM ロール自体の料金は **無料**（Enhanced Monitoring のメトリクス送信料金のみ発生）
+
+**本プロジェクトでの実装**:
+
+`terraform/modules/app-infrastructure/iam_role.tf` にて、他の IAM ロールと同様に `terraform-aws-modules/iam/aws//modules/iam-role` モジュールで定義している。`create = var.rds_monitoring_interval > 0` により、Enhanced Monitoring が無効なステージング環境では **ロール自体が作成されない**（不要リソースが残らない）。
+
+```hcl
+module "rds_enhanced_monitoring_role" {
+  source = "terraform-aws-modules/iam/aws//modules/iam-role"
+
+  create = var.rds_monitoring_interval > 0
+
+  name            = "${var.project_name}-rds-enhanced-monitoring"
+  use_name_prefix = false
+
+  trust_policy_permissions = {
+    rds_monitoring = {
+      actions = ["sts:AssumeRole"]
+      principals = [{
+        type        = "Service"
+        identifiers = ["monitoring.rds.amazonaws.com"]
+      }]
+    }
+  }
+
+  policies = {
+    AmazonRDSEnhancedMonitoringRole = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
+  }
+}
+```
+
+RDS 側では条件付きで ARN を参照:
+
+```hcl
+monitoring_interval = var.rds_monitoring_interval
+monitoring_role_arn = var.rds_monitoring_interval > 0 ? module.rds_enhanced_monitoring_role.arn : null
+```
+
 ### 2-8. `apply_immediately`（変更の即時適用）
 
 | 環境 | 推奨値 | 理由 |
@@ -271,7 +323,7 @@ AWS Control Tower / Security Hub いずれも本番DBには **必須コントロ
 | `auto_minor_version_upgrade` | `true` | ✅ 設定済 |
 | `iam_database_authentication_enabled` | `true` | ✅ RDS Proxy + IAM 認証で対応済 |
 | `copy_tags_to_snapshot` | `true` | ✅ 設定済 |
-| `monitoring_role_arn` | Enhanced Monitoring 用 IAM ロール | 未設定（本番で追加検討） |
+| `monitoring_role_arn` | Enhanced Monitoring 用 IAM ロール | ✅ `iam_role.tf` で条件付き作成（`var.rds_monitoring_interval > 0` のときのみ） |
 | `parameter_group_name` | カスタムパラメータグループ | デフォルト使用中 |
 
 ---
