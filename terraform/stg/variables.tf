@@ -54,3 +54,15 @@ variable "image_tag" {
   description = "ECR イメージタグ"
   type        = string
 }
+
+variable "rds_multi_az" {
+  description = "RDSをMulti-AZ構成にするかどうか（本番true推奨）"
+  type        = bool
+  default     = false
+}
+
+variable "rds_backup_retention_period" {
+  description = "RDS自動バックアップの保持日数（0〜35）。0で自動バックアップ無効"
+  type        = number
+  default     = 7
+}

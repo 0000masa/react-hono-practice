@@ -22,6 +22,13 @@ resource "aws_db_instance" "main" {
   auto_minor_version_upgrade      = true
   enabled_cloudwatch_logs_exports = ["error"] # general/auditは必要になってからでOK
   maintenance_window              = "sun:15:00-sun:15:30"
+
+  # Multi-AZ 構成（スタンバイDBを別AZに自動配置、障害時は1〜2分で自動フェイルオーバー）
+  multi_az = var.rds_multi_az
+
+  # 自動バックアップ（最大35日、PITR有効化の前提）
+  backup_retention_period = var.rds_backup_retention_period
+  backup_window           = "17:00-17:30" # UTC。JST 02:00-02:30（メンテナンスウィンドウと被らないように）
   # Performance Insights 自体をON
   # performance_insights_enabled = true
 

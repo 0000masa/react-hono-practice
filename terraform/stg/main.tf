@@ -13,6 +13,9 @@ module "app" {
   ecr_repository_name      = var.ecr_repository_name
   image_tag                = var.image_tag
 
+  rds_multi_az                = var.rds_multi_az
+  rds_backup_retention_period = var.rds_backup_retention_period
+
   providers = {
     aws           = aws
     aws.us_east_1 = aws.us_east_1
