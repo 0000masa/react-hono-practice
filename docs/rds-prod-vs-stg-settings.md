@@ -12,23 +12,33 @@ AWS 公式ドキュメント・AWS Well-Architected Framework・AWS Control Towe
 
 ---
 
+> **TL;DR** = "Too Long; Didn't Read"（長すぎて読まなかった）の略。長文の冒頭に置く「要約」「結論だけ知りたい人向けのまとめ」を意味するインターネット由来の慣用表現。
+
 ## TL;DR — 推奨設定一覧
 
-| 設定項目 | ステージング | 本番 | 備考 |
-|---|---|---|---|
-| `multi_az` | `false` | **`true`** | 本番は単一AZ障害でのDB停止を防ぐため必須 |
-| `backup_retention_period` | `1〜3` 日 | **`14〜35` 日** | ステージングは短く、本番は最低14日 |
-| `deletion_protection` | `false` | **`true`** | 本番は誤削除防止必須 |
-| `skip_final_snapshot` | `true` | **`false`** | 本番は削除前に最終スナップショット取得 |
-| `instance_class` | `db.t4g.micro` | `db.t4g.medium` 以上 | 本番は実負荷に応じて選定 |
-| `allocated_storage` | `20` GB | `100` GB 以上 | 本番は将来の増加を見込む |
-| `storage_type` | `gp3` | `gp3` または `io2` | 高IOPSが必要なら `io2` |
-| `performance_insights_enabled` | `false`（任意） | **`true`** | 本番は性能トラブルシュート用に必須 |
-| `monitoring_interval` | `0`（無効） | `60` 秒 | Enhanced Monitoring を本番で有効化 |
-| `auto_minor_version_upgrade` | `true` | `true` | 両方で有効（セキュリティパッチ） |
-| `apply_immediately` | `true` | **`false`** | 本番はメンテナンスウィンドウまで待つ |
-| `enabled_cloudwatch_logs_exports` | `["error"]` | `["error", "slowquery", "general"]` | 本番は監査・分析のため広めに |
-| `storage_encrypted` | `true` | `true` | 両方で必須（後から変更不可） |
+「Terraform デフォルト」列は `aws_db_instance` リソースで該当属性を **指定しなかった場合に適用される値** を示す。
+
+| 設定項目 | 概要（何を設定するか） | Terraform デフォルト | ステージング | 本番 | 備考 |
+|---|---|---|---|---|---|
+| `multi_az` | スタンバイDBを別AZに配置するか。`true`で同期レプリケーション + 自動フェイルオーバーが有効化される | `false` | `false` | **`true`** | 本番は単一AZ障害でのDB停止を防ぐため必須 |
+| `backup_retention_period` | 自動バックアップの保持日数（0〜35）。この日数分のPITR（任意時点復元）が可能 | `0`（自動バックアップ無効）※AWS API側で `1` に補正される場合あり | `1〜3` 日 | **`14〜35` 日** | ステージングは短く、本番は最低14日 |
+| `deletion_protection` | DBインスタンスの削除保護。`true`にすると、この設定をfalseに戻すまでDBを削除できなくなる | `false` | `false` | **`true`** | 本番は誤削除防止必須 |
+| `skip_final_snapshot` | DB削除時に最終スナップショットを取得するかをスキップするか。`false`にすると削除直前のデータがスナップショットとして残る | `false`（= 最終スナップショット取得） | `true` | **`false`** | `false`時は `final_snapshot_identifier` 指定必須 |
+| `instance_class` | DBインスタンスの計算リソース（CPU/メモリ）スペック。`db.t4g.micro` から `db.r6g.16xlarge` まで多数の選択肢あり | **必須**（デフォルトなし） | `db.t4g.micro` | `db.t4g.medium` 以上 | 本番は実負荷に応じて選定 |
+| `allocated_storage` | **初期割り当てストレージ容量（GB）**。この値分が常時課金される（実使用量ではなく確保量に対して課金） | **必須**（デフォルトなし） | `20` GB | `100` GB 以上 | 本番は将来の増加を見込む |
+| `max_allocated_storage` | **Storage Autoscalingの拡張上限（GB）**。`allocated_storage`が枯渇しそうになると自動拡張される。設定値自体には課金されず、実際に拡張された分のみ課金 | `0`（自動拡張無効） | `0`（無効） | `500` 以上 | 大きめに設定しても料金は増えない（保険として推奨） |
+| `storage_type` | ストレージ種別。`gp2`/`gp3`（汎用SSD）、`io1`/`io2`（プロビジョンドIOPS）、`magnetic`（旧世代HDD） | `gp2`（`io1`/`io2` 指定時を除く） | `gp3` | `gp3` または `io2` | `gp3` の方がコスト効率良 |
+| `performance_insights_enabled` | Performance Insights（DB性能可視化ツール）の有効化。スロークエリ・ロック待ち・トップSQLが可視化される | `false` | `false`（任意） | **`true`** | 本番は性能トラブルシュート用に必須 |
+| `monitoring_interval` | Enhanced Monitoringのメトリクス取得間隔（秒）。`0`/`1`/`5`/`10`/`15`/`30`/`60`から選択。OS層のCPU・メモリ・プロセス情報をCloudWatchに送信 | `0`（Enhanced Monitoring 無効） | `0`（無効） | `60` 秒 | 本番で有効化 |
+| `auto_minor_version_upgrade` | DBエンジンのマイナーバージョン自動アップグレード。セキュリティパッチが自動適用される | `true` | `true` | `true` | 両方で有効（セキュリティパッチ） |
+| `apply_immediately` | 設定変更を即座に適用するか。`false`にするとメンテナンスウィンドウまで反映が遅延される | `false` | `true` | **`false`** | 本番でtrueは予期しないダウンタイムの原因になる |
+| `enabled_cloudwatch_logs_exports` | CloudWatch Logsへエクスポートするログ種別の配列。`error`/`slowquery`/`general`/`audit`から選択 | `null`（無効） | `["error"]` | `["error", "slowquery", "general"]` | 本番は監査・分析のため広めに |
+| `storage_encrypted` | 保管時暗号化（AES-256）の有効化。データ・自動バックアップ・スナップショット・ログ全てが暗号化される | `false` | `true` | `true` | 両方で必須（後から変更不可） |
+| `publicly_accessible` | DBインスタンスにパブリックIPを割り当てインターネットから直接接続可能にするか | `false` | `false` | `false` | 両方で必須（VPC内のみアクセス） |
+| `copy_tags_to_snapshot` | DBインスタンスのタグをスナップショットに自動コピーするか。コスト管理・棚卸しに必要 | `false` | `true` | `true` | スナップショット管理のため有効化 |
+| `iam_database_authentication_enabled` | IAM認証によるDB接続を有効化。DBユーザーパスワード不要でIAMトークンで接続可能 | `false` | `true` | `true` | RDS Proxy + IAM認証で対応済 |
+| `backup_window` | 自動バックアップを実行する時間帯（UTC、30分単位）。`hh:mm-hh:mm`形式 | AWSが自動選択 | `"17:00-17:30"` UTC | 業務時間外（例: JST 02:00-02:30 = UTC 17:00-17:30） | I/O負荷が増えるため業務時間外に設定 |
+| `maintenance_window` | OS/エンジンパッチを適用する時間帯（UTC、30分単位）。`ddd:hh:mm-ddd:hh:mm`形式 | AWSが自動選択 | `"sun:15:00-sun:15:30"` | 業務時間外 | 再起動を伴うため業務時間外に設定 |
 
 ---
 
