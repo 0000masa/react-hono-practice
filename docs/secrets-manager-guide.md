@@ -211,6 +211,20 @@ MySQL 用のテンプレート名: `SecretsManagerRDSMySQLRotationSingleUser`
 - **RDS へのアクセス**: ローテーション Lambda 用のセキュリティグループから RDS SG への Port 3306 ingress を許可する
 - **Secrets Manager API へのアクセス**: NAT Gateway があれば到達可能。NAT Gateway がない環境では Secrets Manager 用の VPC エンドポイントが必要
 
+### ローテーション Lambda が RDS Proxy を経由しない理由
+
+アプリケーション用の Lambda は RDS Proxy を経由して RDS に接続するのに対し、ローテーション Lambda は **RDS Proxy を経由せず RDS に直接接続**する。セキュリティグループも `rotation_lambda_sg` → `rds_sg` の直接 ingress を許可する構成になっている。
+
+これは以下の理由による:
+
+- **パスワード変更は RDS の管理操作である**: ローテーション Lambda は `ALTER USER` 文を実行して MySQL ユーザーのパスワードを変更する。RDS Proxy は「接続のプロキシ」であって、Proxy 経由で `ALTER USER` を流す設計ではない。
+- **Proxy が古いパスワードでキャッシュしている可能性**: RDS Proxy は Secrets Manager から取得した認証情報で RDS に接続を維持している。パスワード変更の最中は Proxy が保持している認証情報が古い状態になりうるため、Proxy 経由で接続すると失敗する可能性がある。
+- **SAR テンプレートの前提**: `SecretsManagerRDSMySQLRotationSingleUser` テンプレートは、シークレット内に記載されている RDS のエンドポイント（マスターエンドポイント or リードライターエンドポイント）に対して直接接続する前提で実装されている。Proxy を経由させる設定項目は存在しない。
+
+このため、ローテーション Lambda 専用のセキュリティグループを作り、RDS SG に対して直接 ingress を許可している（`security_groups.tf` の `rotation_lambda_sg` と `rds_sg` の ingress 参照）。
+
+一方で、ローテーション完了後のアプリケーションからの接続は通常通り RDS Proxy 経由で行われ、Proxy が Secrets Manager の更新を自動検知して新しい認証情報を取得する（セクション 3 参照）。結果として、ローテーション処理中もアプリ側のコード・接続設定の変更は一切不要となる。
+
 ---
 
 ## 5. Terraform 実装の詳細

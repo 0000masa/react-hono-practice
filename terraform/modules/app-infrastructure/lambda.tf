@@ -232,17 +232,6 @@ resource "aws_serverlessapplicationrepository_cloudformation_stack" "rotation_la
   }
 }
 
-# Secrets Manager からローテーション Lambda を呼び出すためのパーミッション
-resource "aws_lambda_permission" "secrets_manager_rotation" {
-  function_name = "${var.project_name}-rds-rotation"
-  statement_id  = "AllowSecretsManagerInvoke"
-  action        = "lambda:InvokeFunction"
-  principal     = "secretsmanager.amazonaws.com"
-  source_arn    = aws_secretsmanager_secret.rds_credentials.arn
-
-  depends_on = [aws_serverlessapplicationrepository_cloudformation_stack.rotation_lambda]
-}
-
 # ==============================================================================
 # サブスクリプションフィルターエラー通知 Lambda
 # ==============================================================================
@@ -291,6 +280,17 @@ resource "aws_lambda_permission" "eventbridge_daily_report" {
   function_name = aws_lambda_function.daily_report.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.daily_report.arn
+}
+
+# Secrets Manager からローテーション Lambda を呼び出すためのパーミッション
+resource "aws_lambda_permission" "secrets_manager_rotation" {
+  function_name = "${var.project_name}-rds-rotation"
+  statement_id  = "AllowSecretsManagerInvoke"
+  action        = "lambda:InvokeFunction"
+  principal     = "secretsmanager.amazonaws.com"
+  source_arn    = aws_secretsmanager_secret.rds_credentials.arn
+
+  depends_on = [aws_serverlessapplicationrepository_cloudformation_stack.rotation_lambda]
 }
 
 # LambdaがCloudWatch Logsから呼び出せるようにする
