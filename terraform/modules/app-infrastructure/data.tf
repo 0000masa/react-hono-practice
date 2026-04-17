@@ -44,13 +44,6 @@ data "aws_cloudfront_origin_request_policy" "all_viewer_except_host" {
   name = "Managed-AllViewerExceptHostHeader"
 }
 
-# 通知 Lambda 用の zip ファイル
-data "archive_file" "lambda_zip" {
-  type        = "zip"
-  source_file = local_file.lambda_py.filename
-  output_path = "${path.module}/.tmp/lambda.zip"
-}
-
 # --- ECR リポジトリ参照 ---
 # ECR リポジトリは別途作成済みの前提。イメージは GitHub Actions でプッシュする。
 data "aws_ecr_repository" "backend" {

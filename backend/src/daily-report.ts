@@ -2,6 +2,7 @@ import { eq, and, gte, lt, count } from 'drizzle-orm';
 import { initDatabase, db } from './config/database';
 import { qrCodes, users } from './db/schema';
 import { sendMail } from './services/mail.service';
+import { logError } from './utils/logger';
 
 const dbReady = initDatabase();
 
@@ -80,7 +81,10 @@ export const handler = async () => {
     try {
       await sendMail(user.email, subject, body);
     } catch (error) {
-      console.error(`Failed to send daily report to ${user.email}:`, error);
+      logError('ERROR', 'daily-report', 'Failed to send daily report', error, {
+        userEmail: user.email,
+        userId: user.id,
+      });
     }
   }
 

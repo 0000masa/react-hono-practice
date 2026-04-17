@@ -38,8 +38,11 @@ resource "aws_cloudwatch_log_subscription_filter" "lambda_error_to_notification"
   name           = "${var.project_name}-lambda-error-to-notification"
   log_group_name = aws_cloudwatch_log_group.lambda_api_log.name
 
-  # ERROR または CRITICAL を含むログをマッチ
-  filter_pattern  = "?ERROR ?CRITICAL"
+  # backend/src/utils/logger.ts が出力する統一 JSON ログの level が
+  # "ERROR" または "CRITICAL" のものだけを通知 Lambda に流す。
+  # 単純な文字列マッチ（?ERROR ?CRITICAL）だと、ライブラリ出力の
+  # "ERROR" 文字列等で誤検知するため JSON フィルタで厳密に絞り込む。
+  filter_pattern  = "{ $.level = \"ERROR\" || $.level = \"CRITICAL\" }"
   destination_arn = aws_lambda_function.notification_function.arn
 
   depends_on = [aws_lambda_permission.allow_cloudwatch_logs_invoke]

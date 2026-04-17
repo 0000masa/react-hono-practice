@@ -238,25 +238,31 @@ resource "aws_serverlessapplicationrepository_cloudformation_stack" "rotation_la
 resource "aws_lambda_function" "notification_function" {
   function_name = "${var.project_name}-notifications-email"
   role          = module.notification_lambda_role.arn
+  package_type  = "Image"
+  image_uri     = local.lambda_image_uri
+  memory_size   = 256
+  timeout       = 30
 
-  runtime          = "python3.11"
-  handler          = "lambda_function.lambda_handler"
-  filename         = data.archive_file.lambda_zip.output_path
-  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
-
-  timeout     = 30
-  memory_size = 128
+  image_config {
+    command = ["notifications-email.handler"]
+  }
 
   environment {
     variables = {
       PROJECT_NAME     = var.project_name
       APP_ENV          = var.app_env
       ALERT_EMAIL_TO   = var.alert_email_to
-      ALERT_EMAIL_FROM = "noreply@${var.sub_frontend_domain_name}.${var.domain_name}",
+      ALERT_EMAIL_FROM = "noreply@${var.sub_frontend_domain_name}.${var.domain_name}"
+      SES_REGION       = "ap-northeast-1"
     }
   }
+
   lifecycle {
-    ignore_changes = [filename, source_code_hash]
+    ignore_changes = [image_uri]
+  }
+
+  tags = {
+    Name = "${var.project_name}-notifications-email"
   }
 }
 

@@ -1,5 +1,5 @@
 # Lambda 関数のイメージ URI を更新するワークフロー
-# ECR にプッシュ済みのイメージタグを指定して、4 つの Lambda 関数を一括更新する
+# ECR にプッシュ済みのイメージタグを指定して、5 つの Lambda 関数を一括更新する
 # deploy-backend-lambda.yml（ECR プッシュ）の後に実行する想定
 
 on:
@@ -76,7 +76,7 @@ jobs:
         run: |
           echo "IMAGE_URI=$ECR_REGISTRY/$ECR_REPOSITORY:${{ inputs.image_tag }}" >> $GITHUB_ENV
 
-      # 4 つの Lambda 関数のイメージを更新
+      # 5 つの Lambda 関数のイメージを更新
       - name: Update Lambda functions
         run: |
           FUNCTIONS=(
@@ -84,6 +84,7 @@ jobs:
             "${{ env.PROJECT_NAME }}-sqs-worker"
             "${{ env.PROJECT_NAME }}-migration"
             "${{ env.PROJECT_NAME }}-daily-report"
+            "${{ env.PROJECT_NAME }}-notifications-email"
           )
 
           for FUNC_NAME in "${FUNCTIONS[@]}"; do
@@ -104,6 +105,7 @@ jobs:
             "${{ env.PROJECT_NAME }}-sqs-worker"
             "${{ env.PROJECT_NAME }}-migration"
             "${{ env.PROJECT_NAME }}-daily-report"
+            "${{ env.PROJECT_NAME }}-notifications-email"
           )
 
           for FUNC_NAME in "${FUNCTIONS[@]}"; do
