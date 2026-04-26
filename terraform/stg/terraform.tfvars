@@ -8,6 +8,7 @@ ecr_repository_name      = "react-hono-practice-backend-lambda"
 image_tag                = "sha-f25851a936be60b7727ed04ef30390a19cbc36f5"
 alert_email_to           = "mousetest12345@gmail.com"
 app_env                  = "staging"
+enable_nat_gateway       = true
 
 # --- RDS（ステージング設定） ---
 # シングルAZ・短めのバックアップ保持・最小構成でコスト最適化
