@@ -37,28 +37,3 @@ resource "aws_ssm_parameter" "backend_url" {
   type  = "String"
   value = "https://${var.sub_frontend_domain_name}.${var.domain_name}"
 }
-
-# Lambda 関数名の保存（CI/CD でのデプロイ用）
-resource "aws_ssm_parameter" "lambda_api_function_name" {
-  name  = "${var.parameter_store_path}lambda_api_function_name"
-  type  = "String"
-  value = aws_lambda_function.api.function_name
-}
-
-resource "aws_ssm_parameter" "lambda_sqs_worker_function_name" {
-  name  = "${var.parameter_store_path}lambda_sqs_worker_function_name"
-  type  = "String"
-  value = aws_lambda_function.sqs_worker.function_name
-}
-
-resource "aws_ssm_parameter" "lambda_db_task_function_name" {
-  name  = "${var.parameter_store_path}lambda_db_task_function_name"
-  type  = "String"
-  value = aws_lambda_function.db_task.function_name
-}
-
-resource "aws_ssm_parameter" "lambda_daily_report_function_name" {
-  name  = "${var.parameter_store_path}lambda_daily_report_function_name"
-  type  = "String"
-  value = aws_lambda_function.daily_report.function_name
-}
