@@ -1,6 +1,11 @@
 export type LogLevel = 'ERROR' | 'CRITICAL';
 
-export type LogSource = 'api' | 'sqs-handler' | 'db-task' | 'daily-report';
+export type LogSource =
+  | 'api'
+  | 'sqs-handler'
+  | 'db-task'
+  | 'daily-report'
+  | 'notifications-email';
 
 export type LogContext = Record<string, unknown>;
 

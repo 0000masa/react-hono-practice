@@ -1,4 +1,5 @@
 import type { Context } from 'hono';
+import { HTTPException } from 'hono/http-exception';
 import { sendMail } from '../services/mail.service';
 import type { Env } from '../types/index';
 
@@ -26,20 +27,18 @@ export async function send(c: Context<Env>) {
   }
 
   if (Object.keys(errors).length > 0) {
-    return c.json({ error: 'バリデーションエラー', messages: errors }, 422);
+    throw new HTTPException(422, {
+      res: c.json({ error: 'バリデーションエラー', messages: errors }, 422),
+    });
   }
 
   try {
     await sendMail(body.to!, body.subject!, body.message!);
     return c.json({ message: 'メールを送信しました' });
   } catch (error) {
-    console.error('Mail send error:', error);
-    return c.json(
-      {
-        error: 'メールの送信に失敗しました',
-        message: error instanceof Error ? error.message : 'Unknown error',
-      },
-      500,
-    );
+    throw new HTTPException(500, {
+      message: 'メールの送信に失敗しました',
+      cause: error,
+    });
   }
 }

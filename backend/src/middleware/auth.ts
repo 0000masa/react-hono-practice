@@ -1,4 +1,5 @@
 import { createMiddleware } from 'hono/factory';
+import { HTTPException } from 'hono/http-exception';
 import { getAuth } from '../config/auth';
 import type { AuthUser, Env } from '../types/index';
 
@@ -8,7 +9,7 @@ export const authMiddleware = createMiddleware<Env>(async (c, next) => {
   });
 
   if (!session?.user) {
-    return c.json({ error: '認証が必要です' }, 401);
+    throw new HTTPException(401, { message: '認証が必要です' });
   }
 
   const user: AuthUser = {

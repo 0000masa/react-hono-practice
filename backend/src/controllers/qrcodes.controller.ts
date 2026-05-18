@@ -1,4 +1,5 @@
 import type { Context } from 'hono';
+import { HTTPException } from 'hono/http-exception';
 import { desc, count, eq } from 'drizzle-orm';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { db } from '../config/database';
@@ -6,6 +7,7 @@ import { qrCodes, users } from '../db/schema';
 import { generateAndUpload } from '../services/qrcode.service';
 import { getFileUrl } from '../services/storage.service';
 import { env } from '../config/env';
+import { logError } from '../utils/logger';
 import type { Env, PaginationMeta } from '../types/index';
 
 const sqsClient = env.SQS_QUEUE_URL ? new SQSClient({}) : null;
@@ -80,7 +82,9 @@ export async function store(c: Context<Env>) {
   }
 
   if (Object.keys(errors).length > 0) {
-    return c.json({ error: 'バリデーションエラー', messages: errors }, 422);
+    throw new HTTPException(422, {
+      res: c.json({ error: 'バリデーションエラー', messages: errors }, 422),
+    });
   }
 
   const user = c.get('user');
@@ -118,14 +122,10 @@ export async function store(c: Context<Env>) {
       201,
     );
   } catch (error) {
-    console.error('QR code generation error:', error);
-    return c.json(
-      {
-        error: 'QRコードの生成に失敗しました',
-        message: error instanceof Error ? error.message : 'Unknown error',
-      },
-      500,
-    );
+    throw new HTTPException(500, {
+      message: 'QRコードの生成に失敗しました',
+      cause: error,
+    });
   }
 }
 
@@ -140,7 +140,9 @@ export async function storeAsync(c: Context<Env>) {
   }
 
   if (Object.keys(errors).length > 0) {
-    return c.json({ error: 'バリデーションエラー', messages: errors }, 422);
+    throw new HTTPException(422, {
+      res: c.json({ error: 'バリデーションエラー', messages: errors }, 422),
+    });
   }
 
   const user = c.get('user');
@@ -164,7 +166,8 @@ export async function storeAsync(c: Context<Env>) {
       }),
     );
   } else {
-    // ローカル開発: SQS なしで直接処理
+    // ローカル開発: SQS なしで直接処理。fire-and-forget なので throw しても
+    // 呼び出し元には届かない。logError 直接呼び + DB の失敗ステータス更新で記録する。
     (async () => {
       try {
         const fileName = await generateAndUpload(body.data!, user.id);
@@ -173,7 +176,10 @@ export async function storeAsync(c: Context<Env>) {
           .set({ fileName, status: 'completed' })
           .where(eq(qrCodes.id, result.id));
       } catch (error) {
-        console.error('Async QR code generation error:', error);
+        logError('ERROR', 'api', 'Async QR code generation failed', error, {
+          qrCodeId: result.id,
+          userId: user.id,
+        });
         await db
           .update(qrCodes)
           .set({ status: 'failed' })
@@ -206,7 +212,7 @@ export async function status(c: Context<Env>) {
     .limit(1);
 
   if (!qrCode) {
-    return c.json({ error: 'QRコードが見つかりません' }, 404);
+    throw new HTTPException(404, { message: 'QRコードが見つかりません' });
   }
 
   const response: Record<string, unknown> = {

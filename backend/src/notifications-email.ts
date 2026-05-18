@@ -1,5 +1,6 @@
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import { gunzipSync } from 'node:zlib';
+import { logError } from './utils/logger';
 
 // CloudWatch Logs subscription filter が Lambda に渡す event 形式。
 // awslogs.data は gzip 圧縮後 base64 エンコードされた JSON 文字列。
@@ -94,7 +95,12 @@ async function sendEmail(subject: string, body: string): Promise<void> {
 
   const fromAddr = process.env.ALERT_EMAIL_FROM;
   if (!fromAddr) {
-    console.error('ALERT_EMAIL_FROM is not set; skipping SES send.');
+    logError(
+      'ERROR',
+      'notifications-email',
+      'ALERT_EMAIL_FROM is not set; skipping SES send.',
+      undefined,
+    );
     return;
   }
 
@@ -110,8 +116,9 @@ async function sendEmail(subject: string, body: string): Promise<void> {
       }),
     );
   } catch (e) {
-    // SES 失敗でハンドラ全体を落とさない（Python 版の挙動踏襲）
-    console.error('SES send failed:', e);
+    // SES 失敗でハンドラ全体を落とさない（Python 版の挙動踏襲）。
+    // ロググループは subscription filter 対象外 (cloudwatch.tf 参照) なので自己ループにはならない。
+    logError('ERROR', 'notifications-email', 'SES send failed', e);
   }
 }
 
