@@ -1,0 +1,136 @@
+# DB タスク Lambda（${project}-db-task）を invoke するワークフロー
+# operation で migrate / seed / sql を切り替える。
+# sql operation の権限境界は environment (required reviewers) で担保する。
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: "実行先環境"
+        type: choice
+        options:
+          - stg
+          - prod
+        required: true
+        default: stg
+
+      operation:
+        description: "実行する操作"
+        type: choice
+        options:
+          - migrate
+          - seed
+          - sql
+        required: true
+        default: migrate
+
+      seed_files:
+        description: "seed 対象ファイル（カンマ区切り、空なら全件）。operation=seed のときのみ参照される"
+        type: string
+        required: false
+        default: ""
+
+      sql:
+        description: "実行する SQL（1 文のみ）。operation=sql のとき必須"
+        type: string
+        required: false
+        default: ""
+
+env:
+  AWS_REGION: ap-northeast-1
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  invoke:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target_env }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # prod は main、stg は main または develop でのみ実行可能（update-lambda.yml と同じ）
+      - name: Fail on forbidden branch
+        if: |
+          !(
+            (inputs.target_env == 'prod' && github.ref == 'refs/heads/main') ||
+            (inputs.target_env == 'stg'  && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'))
+          )
+        run: |
+          echo "::error::このブランチでは ${{ inputs.target_env }} 環境への実行はできません。"
+          exit 1
+
+      # operation=sql のとき sql が空ならここで止める
+      - name: Validate inputs
+        run: |
+          if [ "${{ inputs.operation }}" = "sql" ] && [ -z "${{ inputs.sql }}" ]; then
+            echo "::error::operation=sql のときは sql 入力が必須です。"
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve project name
+        run: |
+          if [ "${{ inputs.target_env }}" = "prod" ]; then
+            echo "PROJECT_NAME=practice-prod" >> $GITHUB_ENV
+          else
+            echo "PROJECT_NAME=practice-stg" >> $GITHUB_ENV
+          fi
+
+      # payload を operation に応じて組み立てる
+      # JSON は jq で安全にエスケープする（sql に " や改行が含まれても壊れない）
+      - name: Build payload
+        env:
+          OPERATION: ${{ inputs.operation }}
+          SEED_FILES: ${{ inputs.seed_files }}
+          SQL: ${{ inputs.sql }}
+        run: |
+          case "$OPERATION" in
+            migrate)
+              PAYLOAD=$(jq -nc --arg op "$OPERATION" '{operation: $op}')
+              ;;
+            seed)
+              if [ -z "$SEED_FILES" ]; then
+                PAYLOAD=$(jq -nc --arg op "$OPERATION" '{operation: $op}')
+              else
+                # カンマ区切りを配列に変換
+                PAYLOAD=$(jq -nc --arg op "$OPERATION" --arg files "$SEED_FILES" \
+                  '{operation: $op, files: ($files | split(",") | map(gsub("^\\s+|\\s+$"; "")))}')
+              fi
+              ;;
+            sql)
+              PAYLOAD=$(jq -nc --arg op "$OPERATION" --arg sql "$SQL" '{operation: $op, sql: $sql}')
+              ;;
+          esac
+          echo "PAYLOAD=$PAYLOAD" >> $GITHUB_ENV
+          echo "Payload: $PAYLOAD"
+
+      - name: Invoke db-task Lambda
+        run: |
+          aws lambda invoke \
+            --function-name "${{ env.PROJECT_NAME }}-db-task" \
+            --cli-binary-format raw-in-base64-out \
+            --payload "$PAYLOAD" \
+            --log-type Tail \
+            --query 'LogResult' \
+            --output text \
+            response.json | base64 -d
+          echo ""
+          echo "--- response.json ---"
+          cat response.json
+          echo ""
+
+          # Lambda が FunctionError を返した場合は failure 終了させる
+          # response.json に errorType フィールドがあれば失敗扱い
+          if jq -e '.errorType' response.json > /dev/null; then
+            echo "::error::Lambda returned an error."
+            exit 1
+          fi

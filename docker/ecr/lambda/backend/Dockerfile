@@ -16,7 +16,7 @@ FROM public.ecr.aws/lambda/nodejs:22
 # Lambda ランタイムはこのディレクトリからハンドラーコードを読み込む
 COPY --from=builder /build/dist/lambda.js ${LAMBDA_TASK_ROOT}/lambda.js
 COPY --from=builder /build/dist/sqs-handler.js ${LAMBDA_TASK_ROOT}/sqs-handler.js
-COPY --from=builder /build/dist/migrate.js ${LAMBDA_TASK_ROOT}/migrate.js
+COPY --from=builder /build/dist/db-task.js ${LAMBDA_TASK_ROOT}/db-task.js
 COPY --from=builder /build/dist/daily-report.js ${LAMBDA_TASK_ROOT}/daily-report.js
 COPY --from=builder /build/dist/notifications-email.js ${LAMBDA_TASK_ROOT}/notifications-email.js
 

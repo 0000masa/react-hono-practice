@@ -82,7 +82,7 @@ jobs:
           FUNCTIONS=(
             "${{ env.PROJECT_NAME }}-api"
             "${{ env.PROJECT_NAME }}-sqs-worker"
-            "${{ env.PROJECT_NAME }}-migration"
+            "${{ env.PROJECT_NAME }}-db-task"
             "${{ env.PROJECT_NAME }}-daily-report"
             "${{ env.PROJECT_NAME }}-notifications-email"
           )
@@ -103,7 +103,7 @@ jobs:
           FUNCTIONS=(
             "${{ env.PROJECT_NAME }}-api"
             "${{ env.PROJECT_NAME }}-sqs-worker"
-            "${{ env.PROJECT_NAME }}-migration"
+            "${{ env.PROJECT_NAME }}-db-task"
             "${{ env.PROJECT_NAME }}-daily-report"
             "${{ env.PROJECT_NAME }}-notifications-email"
           )

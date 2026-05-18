@@ -17,9 +17,9 @@ resource "aws_cloudwatch_log_group" "lambda_sqs_worker_log" {
   retention_in_days = 30
 }
 
-# マイグレーション Lambda 用ロググループ
-resource "aws_cloudwatch_log_group" "lambda_migration_log" {
-  name              = "/aws/lambda/${var.project_name}-migration"
+# DB タスク Lambda 用ロググループ
+resource "aws_cloudwatch_log_group" "lambda_db_task_log" {
+  name              = "/aws/lambda/${var.project_name}-db-task"
   retention_in_days = 30
 }
 

@@ -4,7 +4,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc --noEmit && esbuild src/index.ts --bundle --platform=node --outfile=dist/index.js --packages=external",
-    "build:lambda": "tsc --noEmit && esbuild src/lambda.ts src/sqs-handler.ts src/migrate.ts src/daily-report.ts src/notifications-email.ts --bundle --platform=node --outdir=dist --target=node22 --external:@aws-sdk/*",
+    "build:lambda": "tsc --noEmit && esbuild src/lambda.ts src/sqs-handler.ts src/db-task.ts src/daily-report.ts src/notifications-email.ts --bundle --platform=node --outdir=dist --target=node22 --external:@aws-sdk/*",
     "start": "node dist/index.js"
   },
   "dependencies": {

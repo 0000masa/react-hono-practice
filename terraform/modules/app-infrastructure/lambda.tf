@@ -112,11 +112,11 @@ resource "aws_lambda_event_source_mapping" "qrcode_worker" {
 }
 
 # ==============================================================================
-# マイグレーション Lambda
+# DB タスク Lambda（マイグレーション / シーディング / 任意 SQL を event.operation で切替）
 # ==============================================================================
 
-resource "aws_lambda_function" "migration" {
-  function_name = "${var.project_name}-migration"
+resource "aws_lambda_function" "db_task" {
+  function_name = "${var.project_name}-db-task"
   role          = module.lambda_execution_role.arn
   package_type  = "Image"
   image_uri     = local.lambda_image_uri
@@ -124,7 +124,7 @@ resource "aws_lambda_function" "migration" {
   timeout       = 900 # 最大 15 分
 
   image_config {
-    command = ["migrate.handler"]
+    command = ["db-task.handler"]
   }
 
   vpc_config {
@@ -149,7 +149,7 @@ resource "aws_lambda_function" "migration" {
   }
 
   tags = {
-    Name = "${var.project_name}-migration"
+    Name = "${var.project_name}-db-task"
   }
 }
 

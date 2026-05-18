@@ -51,10 +51,10 @@ resource "aws_ssm_parameter" "lambda_sqs_worker_function_name" {
   value = aws_lambda_function.sqs_worker.function_name
 }
 
-resource "aws_ssm_parameter" "lambda_migration_function_name" {
-  name  = "${var.parameter_store_path}lambda_migration_function_name"
+resource "aws_ssm_parameter" "lambda_db_task_function_name" {
+  name  = "${var.parameter_store_path}lambda_db_task_function_name"
   type  = "String"
-  value = aws_lambda_function.migration.function_name
+  value = aws_lambda_function.db_task.function_name
 }
 
 resource "aws_ssm_parameter" "lambda_daily_report_function_name" {
