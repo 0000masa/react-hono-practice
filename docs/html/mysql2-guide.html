@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>mysql2 ライブラリガイド</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" media="(prefers-color-scheme: light)">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" media="(prefers-color-scheme: dark)">
+</head>
+<body>
+  <div class="layout">
+    <!-- ============================ SIDEBAR ============================ -->
+    <aside class="sidebar">
+      <h2>このページ</h2>
+      <ul>
+        <li><a href="#what-is-mysql2">mysql2 とは</a></li>
+        <li><a href="#mysql2-vs-promise">mysql2 と mysql2/promise の違い</a></li>
+        <li><a href="#import-meaning">import mysql from 'mysql2/promise' の意味</a></li>
+        <li><a href="#pool">Pool (プール) とは</a></li>
+        <li><a href="#project-usage">このプロジェクトでの使われ方 (database.ts)</a></li>
+        <li><a href="#type-error">型エラーについて (ReturnType の罠)</a></li>
+        <li><a href="#lambda-rds-proxy-pool">Lambda + RDS Proxy での Pool について</a></li>
+        <li><a href="#pg-vs-mysql2">PostgreSQL (pg) と MariaDB/MySQL (mysql2) の書き方の違い</a></li>
+        <li><a href="#lambda-rds-proxy-tls">Lambda + RDS Proxy での TLS (SSL) 接続</a></li>
+      </ul>
+    </aside>
+
+    <!-- ============================ CONTENT ============================ -->
+    <main class="content">
+      <nav class="breadcrumb" aria-label="breadcrumb">
+        <a href="../../README.md">プロジェクト</a>
+        <span class="breadcrumb-sep">/</span>
+        <span>docs</span>
+        <span class="breadcrumb-sep">/</span>
+        <span>mysql2-guide</span>
+      </nav>
+
+      <h1>mysql2 ライブラリガイド</h1>
+
+      <h2 id="what-is-mysql2">mysql2 とは</h2>
+
+      <p>Node.js から <strong>MySQL データベースに接続して SQL を実行するためのライブラリ</strong>。
+      元々あった <code>mysql</code> パッケージの改良版で、パフォーマンスが向上し、Promise や Prepared Statement に対応している。</p>
+
+      <h2 id="mysql2-vs-promise">mysql2 と mysql2/promise の違い</h2>
+
+      <p><code>mysql2</code> には2つの API スタイルがある。</p>
+
+      <h3 id="callback-version">コールバック版 (mysql2)</h3>
+
+<pre><code class="language-typescript">import mysql from 'mysql2';
+const pool = mysql.createPool({ host: 'localhost', user: 'root', database: 'mydb' });
+
+// コールバックで結果を受け取る
+pool.query('SELECT * FROM users', (err, results) =&gt; {
+  if (err) throw err;
+  console.log(results);
+});</code></pre>
+
+      <h3 id="promise-version">Promise版 (mysql2/promise)</h3>
+
+<pre><code class="language-typescript">import mysql from 'mysql2/promise';
+const pool = mysql.createPool({ host: 'localhost', user: 'root', database: 'mydb' });
+
+// await で結果を受け取れる
+const [results] = await pool.query('SELECT * FROM users');
+console.log(results);</code></pre>
+
+      <p><code>mysql2/promise</code> は同じライブラリの <strong>Promise 対応版のエントリポイント</strong>。
+      <code>async/await</code> が使えるのでモダンなコードでは基本こちらを使う。
+      このプロジェクトでも <code>mysql2/promise</code> を使用している。</p>
+
+      <h2 id="import-meaning"><code>import mysql from 'mysql2/promise'</code> の意味</h2>
+
+      <ul>
+        <li><code>mysql2</code> → ライブラリ名</li>
+        <li><code>/promise</code> → そのライブラリ内の Promise 版エントリポイント (サブパス)</li>
+      </ul>
+
+      <p><code>mysql</code> という変数名は任意で、ライブラリのデフォルトエクスポートに付ける名前。
+      以下のように書いても動作は同じ:</p>
+
+<pre><code class="language-typescript">import db from 'mysql2/promise';       // OK
+import mysqlLib from 'mysql2/promise';  // OK</code></pre>
+
+      <h2 id="pool">Pool (プール) とは</h2>
+
+      <p>データベース接続を使い回す仕組み。</p>
+
+<pre class="diagram"><code>リクエスト1 → プールから接続を借りる → SQL実行 → 接続を返す
+リクエスト2 → プールから接続を借りる → SQL実行 → 接続を返す</code></pre>
+
+      <p>毎回新しい接続を作ると遅いので、あらかじめ複数の接続を保持しておき、必要なときに貸し出す。</p>
+
+<pre><code class="language-typescript">const pool = mysql.createPool({
+  host: 'localhost',
+  port: 3306,
+  database: 'mydb',
+  user: 'user',
+  password: 'password',
+  waitForConnections: true, // 接続が空くまで待つか
+  connectionLimit: 10,      // 最大接続数
+});</code></pre>
+
+      <h2 id="project-usage">このプロジェクトでの使われ方 (database.ts)</h2>
+
+<pre><code class="language-typescript">import { drizzle } from 'drizzle-orm/mysql2';
+import mysql from 'mysql2/promise';
+
+// mysql2 で接続プールを作成
+const pool = mysql.createPool({ host: ..., port: ..., ... });
+
+// drizzle ORM に渡して、SQL を TypeScript で安全に書けるようにする
+const db = drizzle(pool, { schema, mode: 'default' });</code></pre>
+
+      <p>直接 SQL を書く代わりに、drizzle ORM 経由でデータベースを操作している。
+      mysql2 は「データベースへの接続」を担当し、drizzle は「SQL の組み立てと型安全性」を担当する。</p>
+
+      <h2 id="type-error">型エラーについて (ReturnType の罠)</h2>
+
+      <h3 id="type-error-problem">問題</h3>
+
+<pre><code class="language-typescript">let db: ReturnType&lt;typeof drizzle&gt;;</code></pre>
+
+      <p><code>ReturnType&lt;typeof drizzle&gt;</code> は引数なしで <code>drizzle</code> の戻り値型を推論するため、
+      <code>$client</code> がデフォルトの <code>CallbackPool</code> (コールバック版の Pool) になる。
+      しかし実際には <code>mysql2/promise</code> の <code>Pool</code> (Promise版) を渡しているので型が不一致になる。</p>
+
+      <h3 id="type-error-solution">解決</h3>
+
+<pre><code class="language-typescript">import { drizzle, type MySql2Database } from 'drizzle-orm/mysql2';
+import mysql from 'mysql2/promise';
+
+let db: MySql2Database&lt;typeof schema&gt; &amp; { $client: mysql.Pool };</code></pre>
+
+      <p>Promise 版の <code>Pool</code> と一致するように明示的に型を指定する。</p>
+
+      <h2 id="lambda-rds-proxy-pool">Lambda + RDS Proxy での Pool について</h2>
+
+      <h3 id="lambda-challenge">Lambda の課題</h3>
+
+      <p>Lambda は同時リクエストごとに独立したプロセスが起動する。
+      各プロセスが独自に Pool を作るため、接続数が爆発する。</p>
+
+<pre class="diagram"><code>通常のサーバー(1台):
+  サーバー → Pool(10接続) → RDS
+  ※ 接続を使い回せるので効率的
+
+Lambda(同時100リクエスト):
+  Lambda①  → Pool(10接続) → RDS
+  Lambda②  → Pool(10接続) → RDS
+  Lambda③  → Pool(10接続) → RDS
+  ...
+  → 最大 100 × 10 = 1000接続!RDS が耐えられない</code></pre>
+
+      <h3 id="rds-proxy-solution">RDS Proxy で解決</h3>
+
+      <p>RDS Proxy が Lambda からの接続をまとめて、RDS への接続数を抑える。</p>
+
+<pre class="diagram"><code>Lambda①  → Pool(1接続) →┐
+Lambda②  → Pool(1接続) → RDS Proxy → RDS
+Lambda③  → Pool(1接続) →┘
+→ RDS Proxy が接続をまとめてくれる</code></pre>
+
+      <ul>
+        <li><code>connectionLimit: 1</code> — Lambda 1インスタンスに接続1本で十分。Proxy が束ねてくれる</li>
+        <li>Pool 自体は使う — <code>mysql2</code> の API として Pool を使うだけで問題ない。接続1本の Pool は実質単一接続と同じ</li>
+        <li>ライブラリを変える必要はない</li>
+      </ul>
+
+      <p>このプロジェクトの <code>database.ts</code> で IAM 認証時に <code>connectionLimit: 1</code> にしているのはまさにこの理由。</p>
+
+      <h2 id="pg-vs-mysql2">PostgreSQL (pg) と MariaDB/MySQL (mysql2) の書き方の違い</h2>
+
+      <p>使う DB に応じて drizzle の import 先と接続ライブラリが変わる。</p>
+
+<pre><code class="language-typescript">// PostgreSQL の場合
+import { drizzle } from 'drizzle-orm/node-postgres'  // ← postgres用
+import { Pool } from 'pg'                             // ← pg ライブラリ
+
+const pool = new Pool({ connectionString: '...' })
+export const db = drizzle(pool, { schema })
+
+// MariaDB/MySQL の場合(今回のプロジェクト)
+import { drizzle } from 'drizzle-orm/mysql2'          // ← mysql用
+import mysql from 'mysql2/promise'                     // ← mysql2 ライブラリ
+
+const pool = mysql.createPool({ host: '...', port: 3306, ... })
+export const db = drizzle(pool, { schema, mode: 'default' })</code></pre>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th></th>
+              <th>PostgreSQL</th>
+              <th>MariaDB/MySQL</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>接続ライブラリ</td>
+              <td><code>pg</code></td>
+              <td><code>mysql2/promise</code></td>
+            </tr>
+            <tr>
+              <td>drizzle の import</td>
+              <td><code>drizzle-orm/node-postgres</code></td>
+              <td><code>drizzle-orm/mysql2</code></td>
+            </tr>
+            <tr>
+              <td>Pool の作り方</td>
+              <td><code>new Pool({...})</code></td>
+              <td><code>mysql.createPool({...})</code></td>
+            </tr>
+            <tr>
+              <td>接続文字列</td>
+              <td><code>connectionString</code> 1本で指定</td>
+              <td><code>host</code>, <code>port</code>, <code>user</code> 等を個別に指定</td>
+            </tr>
+            <tr>
+              <td><code>mode</code></td>
+              <td>不要</td>
+              <td><code>mode: 'default'</code> が必要</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>drizzle を使う側のコード (クエリ部分) はほぼ同じ。違いは接続部分だけなので <code>database.ts</code> に差が集約されている。</p>
+
+      <h2 id="lambda-rds-proxy-tls">Lambda + RDS Proxy での TLS (SSL) 接続</h2>
+
+      <h3 id="two-tls-segments">2 区間の TLS</h3>
+
+      <p>Lambda から RDS Proxy 経由で RDS に接続する場合、TLS 通信は 2 区間に分かれる。</p>
+
+<pre class="diagram"><code>Lambda ──TLS①──→ RDS Proxy ──TLS②──→ RDS</code></pre>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>区間</th>
+              <th>制御方法</th>
+              <th>証明書</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Lambda → RDS Proxy</td>
+              <td>Terraform の <code>require_tls = true</code> で強制。Lambda 側は <code>ssl: { rejectUnauthorized: true }</code> で検証</td>
+              <td><strong>Amazon Trust Services</strong> のパブリック CA が発行</td>
+            </tr>
+            <tr>
+              <td>RDS Proxy → RDS</td>
+              <td>RDS Proxy が内部的に自動で TLS 接続する。ユーザー側の設定は不要</td>
+              <td>RDS Proxy が内部的に検証 (AWS が管理)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Lambda が気にするのは RDS Proxy までの TLS だけ。Proxy から先は AWS が面倒を見てくれる。</p>
+
+      <h3 id="no-ca-cert-needed">Dockerfile に CA 証明書のインストールは不要</h3>
+
+      <p>RDS Proxy の証明書は <strong>Amazon Trust Services</strong> のパブリック CA が発行している。
+      この CA は Node.js にデフォルトで含まれている <strong>Mozilla CA バンドル</strong> に入っているため、
+      Lambda の Docker イメージに追加の証明書をインストールする必要はない。</p>
+
+<pre><code class="language-typescript">// database.ts(IAM 認証時)
+pool = mysql.createPool({
+  host: env.DATABASE_HOST,
+  ssl: { rejectUnauthorized: true }, // ← 追加の CA 証明書なしで動作する
+  // ...
+});</code></pre>
+
+      <h3 id="direct-rds-tls">RDS に直接 TLS 接続する場合との違い</h3>
+
+      <p>RDS Proxy を経由せず RDS に直接 TLS 接続する場合は事情が異なる。</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>接続先</th>
+              <th>証明書の発行元</th>
+              <th>Node.js デフォルトの CA バンドルに含まれるか</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>RDS Proxy</td>
+              <td>Amazon Trust Services (パブリック CA)</td>
+              <td>含まれる → 追加インストール不要</td>
+            </tr>
+            <tr>
+              <td>RDS (直接)</td>
+              <td>Amazon RDS 専用 CA (<code>rds-ca-rsa2048-g1</code> 等)</td>
+              <td><strong>含まれない</strong> → CA 証明書のダウンロードと設定が必要</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>RDS に直接 TLS 接続する場合は、Amazon RDS の CA 証明書バンドルをダウンロードして
+      Dockerfile に組み込み、<code>ssl.ca</code> オプションで指定する必要がある。</p>
+
+<pre><code class="language-typescript">// RDS 直接接続の場合(参考)
+import fs from 'node:fs';
+
+pool = mysql.createPool({
+  host: 'rds-instance.xxxx.ap-northeast-1.rds.amazonaws.com',
+  ssl: {
+    rejectUnauthorized: true,
+    ca: fs.readFileSync('/path/to/amazon-rds-ca-bundle.pem'), // ← 必要
+  },
+});</code></pre>
+
+      <p>このプロジェクトでは RDS Proxy 経由で接続しているため、上記の対応は不要。</p>
+
+      <h3 id="connection-string">connectionString とは</h3>
+
+      <p>接続情報を1つの URL 文字列にまとめたもの。環境変数 <code>DATABASE_URL</code> として設定されることが多い。</p>
+
+<pre class="diagram"><code>postgresql://user:password@host:5432/database
+↑プロトコル  ↑ユーザー ↑パスワード ↑ホスト ↑ポート ↑DB名</code></pre>
+
+      <p>MySQL でも同様の形式はあるが、<code>mysql2</code> では <code>host</code>, <code>port</code>, <code>user</code>, <code>password</code> 等を個別に指定するのが一般的。</p>
+    </main>
+  </div>
+
+  <!-- Prism.js (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+</body>
+</html>

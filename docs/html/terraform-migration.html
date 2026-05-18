@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Terraform 構成変更: ECS/ALB → API Gateway + Lambda + RDS Proxy</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" media="(prefers-color-scheme: light)">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" media="(prefers-color-scheme: dark)">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <h2>このページ</h2>
+      <ul>
+        <li><a href="#overview">概要</a></li>
+        <li><a href="#motivation">移行の動機</a></li>
+        <li>
+          <a href="#architecture-comparison">アーキテクチャ比較</a>
+          <ul>
+            <li><a href="#before" class="toc-h3">移行前</a></li>
+            <li><a href="#after" class="toc-h3">移行後</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#rds-proxy">RDS Proxy と認証パターン</a>
+          <ul>
+            <li><a href="#why-rds-proxy" class="toc-h3">なぜ RDS Proxy が必要か</a></li>
+            <li><a href="#proxy-efficiency" class="toc-h3">接続の効率化</a></li>
+            <li><a href="#auth-patterns" class="toc-h3">認証パターン</a></li>
+            <li><a href="#pattern1-flow" class="toc-h3">パターン1 の認証フロー</a></li>
+          </ul>
+        </li>
+        <li><a href="#tf-files">Terraform ファイル構成(移行後)</a></li>
+        <li><a href="#lambda-list">Lambda 関数一覧</a></li>
+        <li><a href="#sg-config">セキュリティグループ構成</a></li>
+        <li><a href="#request-flow">リクエストフロー</a></li>
+        <li>
+          <a href="#backend-changes">バックエンド側の変更</a>
+          <ul>
+            <li><a href="#entry-design" class="toc-h3">1. エントリーポイントの設計</a></li>
+            <li><a href="#build-script" class="toc-h3">2. ビルドスクリプト</a></li>
+            <li><a href="#iam-auth" class="toc-h3">3. RDS Proxy IAM 認証対応</a></li>
+            <li><a href="#sqs-worker-handler" class="toc-h3">4. SQS ワーカーハンドラーの作成</a></li>
+            <li><a href="#migration-handler" class="toc-h3">5. マイグレーション / 日次レポート</a></li>
+          </ul>
+        </li>
+        <li><a href="#deploy">デプロイ方式</a></li>
+        <li><a href="#cost">コスト比較(概算)</a></li>
+        <li>
+          <a href="#api-gateway-choice">API Gateway: HTTP API vs REST API</a>
+          <ul>
+            <li><a href="#api-gateway-compare" class="toc-h3">比較</a></li>
+            <li><a href="#why-rest-api" class="toc-h3">REST API を選んだ理由</a></li>
+          </ul>
+        </li>
+        <li><a href="#notes">注意事項</a></li>
+      </ul>
+    </aside>
+
+    <main class="content">
+      <nav class="breadcrumb" aria-label="breadcrumb">
+        <a href="../../README.md">プロジェクト</a>
+        <span class="breadcrumb-sep">/</span>
+        <span>docs</span>
+        <span class="breadcrumb-sep">/</span>
+        <span>terraform-migration</span>
+      </nav>
+
+      <h1>Terraform 構成変更: ECS/ALB → API Gateway + Lambda + RDS Proxy</h1>
+
+      <h2 id="overview">概要</h2>
+
+      <p>バックエンドのインフラ構成を <strong>ALB + ECS Fargate</strong> から <strong>API Gateway REST API + Lambda + RDS Proxy</strong> に移行する。
+      フロントエンド(S3 + CloudFront)と RDS(MariaDB 11.4)はそのまま維持する。</p>
+
+      <h2 id="motivation">移行の動機</h2>
+
+      <ul>
+        <li>ECS Fargate の常時稼働コスト(Web + Queue Worker で月 ~$40)を削減</li>
+        <li>Lambda のサーバーレス化により、リクエストベースの従量課金に切り替え</li>
+        <li>運用の簡素化(ECS タスク定義、ECR イメージ管理、Blue/Green デプロイ等が不要に)</li>
+      </ul>
+
+      <h2 id="architecture-comparison">アーキテクチャ比較</h2>
+
+      <h3 id="before">移行前</h3>
+
+<pre class="diagram"><code>CloudFront → ALB → ECS Fargate (nginx + backend + fluent-bit + otel)
+                         ↓
+                        RDS (MariaDB 11.4)
+
+ECS Worker (SQS 長ポーリング) → RDS
+EventBridge → ECS RunTask (マイグレーション / 日次レポート)</code></pre>
+
+      <h3 id="after">移行後</h3>
+
+<pre class="diagram"><code>CloudFront (WAF) → API Gateway REST API (API キー認証) → Lambda (API)
+                                                              ↓
+                                                          RDS Proxy (IAM認証)
+                                                              ↓
+                                                          RDS (MariaDB 11.4)
+
+SQS → Lambda (SQS Worker)  → RDS Proxy → RDS
+EventBridge → Lambda (日次レポート) → RDS Proxy → RDS
+GitHub Actions → Lambda (マイグレーション) → RDS Proxy → RDS</code></pre>
+
+      <h2 id="rds-proxy">RDS Proxy と認証パターン</h2>
+
+      <h3 id="why-rds-proxy">なぜ RDS Proxy が必要か</h3>
+
+      <p>Lambda は呼び出しごとに新しい実行環境が起動する可能性がある。直接 RDS に接続すると、同時接続数がスパイクして <code>Too many connections</code> エラーが発生する。RDS Proxy はコネクションプールを管理し、Lambda のスケーリングに伴う接続数の急増を吸収する。</p>
+
+      <h3 id="proxy-efficiency">RDS Proxy が解決するのは「接続の効率化」</h3>
+
+      <p>RDS Proxy は DB の同時接続数を増やすのではなく、<strong>接続の使い方を効率化(多重化 / multiplexing)</strong>する。</p>
+
+      <p><strong>Proxy なしの場合:</strong></p>
+
+<pre class="diagram"><code>Lambda が100個同時起動 → 100本の DB 接続が張られる
+各 Lambda の実行中、SQL を実行していない待ち時間でも接続を占有し続ける
+→ RDS の max_connections(例: 150)をすぐに使い切る</code></pre>
+
+      <p><strong>Proxy ありの場合:</strong></p>
+
+<pre class="diagram"><code>Lambda が100個同時起動 → Proxy が100本のクライアント接続を受ける
+Proxy は内部で少数の DB 接続を使い回す(多重化)
+ある Lambda が SQL を実行していない間、その DB 接続を別の Lambda に割り当てる
+→ クライアント100本に対して実際の DB 接続は数十本で済む</code></pre>
+
+      <p>つまり「クライアント接続数 &gt; 実際の DB 接続数」を実現することで、RDS の <code>max_connections</code> の範囲内でより多くの Lambda を捌ける。極端に大量のリクエストが来た場合は、最終的には RDS 側の接続上限がボトルネックになる。</p>
+
+      <h3 id="auth-patterns">認証パターン</h3>
+
+      <p>Lambda → RDS Proxy → RDS の接続方法には2つのパターンがある。</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th></th><th>パターン1</th><th>パターン2</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Lambda → Proxy</td>
+              <td>IAM 認証</td>
+              <td>IAM 認証</td>
+            </tr>
+            <tr>
+              <td>Proxy → RDS</td>
+              <td>Secrets Manager(パスワード)</td>
+              <td>IAM データベース認証</td>
+            </tr>
+            <tr>
+              <td>MariaDB 対応</td>
+              <td><strong>対応</strong></td>
+              <td><strong>非対応</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><strong>本プロジェクトではパターン1を採用。</strong></p>
+
+      <p>理由:</p>
+      <ul>
+        <li><strong>MariaDB 11.4 は IAM データベース認証をサポートしていない</strong>(MySQL と PostgreSQL のみ対応)。そのためパターン2は技術的に不可能。</li>
+        <li>パターン1 は AWS が推奨する標準的なパターンであり、ドキュメントも豊富。</li>
+      </ul>
+
+      <h3 id="pattern1-flow">パターン1 の認証フロー</h3>
+
+<pre class="diagram"><code>1. Lambda が AWS SDK の Signer で IAM 認証トークンを生成
+2. Lambda がトークンをパスワードとして RDS Proxy に TLS 接続
+3. RDS Proxy が IAM を使って Lambda のロールを検証
+4. RDS Proxy が Secrets Manager から DB パスワードを取得
+5. RDS Proxy が通常のパスワード認証で RDS に接続</code></pre>
+
+      <h2 id="tf-files">Terraform ファイル構成(移行後)</h2>
+
+<pre class="diagram"><code>terraform/modules/app-infrastructure/
+├── acm.tf                 # SSL証明書(フロントエンドのみ)
+├── api_gateway.tf         # 【新規】REST API、API キー、使用量プラン
+├── cloudfront.tf          # 【修正】バックエンドオリジンを API Gateway に変更
+├── cloudwatch.tf          # 【修正】Lambda 用ロググループ + アラーム
+├── data.tf                # 【修正】ECR 参照を削除
+├── event_bridge.tf        # 【修正】ターゲットを Lambda に変更
+├── iam.tf                 # 【修正】Lambda 実行ロール + ポリシー
+├── lambda.tf              # 【新規】API / SQS Worker / Migration / DailyReport
+├── lambda-notification.tf # エラー通知 Lambda(変更なし)
+├── providers.tf           # 【修正】random プロバイダー追加(API キー生成用)
+├── rds.tf                 # RDS インスタンス(変更なし)
+├── rds_proxy.tf           # 【新規】RDS Proxy + IAM ロール
+├── route53.tf             # 【修正】バックエンドレコード削除(API Gateway はデフォルトドメインを使用)
+├── s3.tf                  # S3 バケット(変更なし)
+├── secrets_manager.tf     # 【新規】RDS 認証情報
+├── security_groups.tf     # 【修正】Lambda SG / RDS Proxy SG
+├── ses.tf                 # SES 設定(変更なし)
+├── sns.tf                 # SNS 通知トピック(変更なし)
+├── sqs.tf                 # SQS キュー(変更なし)
+├── ssm.tf                 # 【修正】Lambda 関数名パラメータ追加
+├── variables.tf           # 【修正】image_tag 削除
+├── vpc.tf                 # VPC 設定(変更なし)
+└── waf.tf                 # 【修正】cf_secret 削除
+
+削除されたファイル:
+├── alb.tf                 # ALB + ターゲットグループ + リスナー
+├── ecs_web.tf             # ECS クラスタ + Web サービス + タスク定義
+├── ecs_queue.tf           # ECS キューワーカーサービス
+└── ecs_tasks.tf           # ECS ワンオフタスク(マイグレーション等)</code></pre>
+
+      <h2 id="lambda-list">Lambda 関数一覧</h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>関数名</th><th>ハンドラー</th><th>メモリ</th><th>タイムアウト</th><th>トリガー</th><th>用途</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>{project}-api</code></td>
+              <td><code>lambda.handler</code></td>
+              <td>1024 MB</td>
+              <td>29秒</td>
+              <td>API Gateway</td>
+              <td>Hono API サーバー</td>
+            </tr>
+            <tr>
+              <td><code>{project}-sqs-worker</code></td>
+              <td><code>sqs-handler.handler</code></td>
+              <td>1024 MB</td>
+              <td>60秒</td>
+              <td>SQS</td>
+              <td>QR コード非同期生成</td>
+            </tr>
+            <tr>
+              <td><code>{project}-migration</code></td>
+              <td><code>migrate.handler</code></td>
+              <td>512 MB</td>
+              <td>15分</td>
+              <td>手動実行</td>
+              <td>DB マイグレーション</td>
+            </tr>
+            <tr>
+              <td><code>{project}-daily-report</code></td>
+              <td><code>daily-report.handler</code></td>
+              <td>512 MB</td>
+              <td>5分</td>
+              <td>EventBridge</td>
+              <td>日次レポートバッチ</td>
+            </tr>
+            <tr>
+              <td><code>{project}-notifications-email</code></td>
+              <td><code>lambda_function.lambda_handler</code></td>
+              <td>128 MB</td>
+              <td>30秒</td>
+              <td>CloudWatch Logs</td>
+              <td>エラー通知メール</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="sg-config">セキュリティグループ構成</h2>
+
+<pre class="diagram"><code>Lambda SG
+  ├─ Ingress: なし(Lambda は呼び出されるため不要)
+  └─ Egress: 全トラフィック(NAT Gateway 経由で外部アクセス)
+
+RDS Proxy SG
+  ├─ Ingress: 3306/TCP from Lambda SG
+  └─ Egress: 全トラフィック
+
+RDS SG
+  ├─ Ingress: 3306/TCP from RDS Proxy SG
+  └─ Egress: なし</code></pre>
+
+      <h2 id="request-flow">リクエストフロー</h2>
+
+<pre class="diagram"><code>ユーザー
+  ↓ HTTPS
+CloudFront (WAF 保護)
+  ├─ /api/* → API Gateway REST API (x-api-key ヘッダーで認証)
+  │              ↓ API キーが無い or 不正 → 403 (Lambda に到達しない)
+  │              ↓ API キーが有効
+  │          Lambda (Hono API)
+  │              ↓ IAM 認証 + TLS
+  │          RDS Proxy
+  │              ↓ Secrets Manager パスワード
+  │          RDS (MariaDB)
+  │
+  └─ その他 → S3 (SPA fallback → /index.html)
+
+直接アクセス(CloudFront を経由しない)
+  ↓ HTTPS
+API Gateway REST API → 403 Forbidden(API キー無し)
+  ※ Lambda は起動しない = コスト発生しない</code></pre>
+
+      <h2 id="backend-changes">バックエンド側の変更</h2>
+
+      <p>Terraform の変更だけでは完結しない。バックエンドのアプリケーションコードにも以下の変更が必要。</p>
+
+      <h3 id="entry-design">1. エントリーポイントの設計</h3>
+
+      <p>Hono アプリ本体(<code>src/app.ts</code>)はデプロイ先に依存しない。エントリーポイントをデプロイ先ごとに分離することで、Lambda 以外(Cloudflare Workers 等)にも対応できる構成にしている。</p>
+
+<pre class="diagram"><code>src/
+├── app.ts       # Hono アプリ本体(共通、デプロイ先に依存しない)
+├── index.ts     # Node.js 用エントリーポイント(ローカル開発)
+└── lambda.ts    # AWS Lambda 用エントリーポイント</code></pre>
+
+      <p><code>src/lambda.ts</code>:</p>
+
+<pre><code class="language-typescript">import { handle } from 'hono/aws-lambda';
+import { initDatabase } from './config/database';
+import app from './app';
+
+const dbReady = initDatabase();
+const lambdaHandler = handle(app);
+
+export const handler = async (event: any, context: any) =&gt; {
+  await dbReady;
+  return lambdaHandler(event, context);
+};</code></pre>
+
+      <h3 id="build-script">2. ビルドスクリプト</h3>
+
+      <p>デプロイ先ごとにビルドスクリプトを分離:</p>
+
+<pre><code class="language-json">{
+  "build": "esbuild src/index.ts --bundle --platform=node --outfile=dist/index.js --packages=external",
+  "build:lambda": "esbuild src/lambda.ts --bundle --platform=node --outfile=dist/lambda.js --target=node20 --external:@aws-sdk/*"
+}</code></pre>
+
+      <p><code>@aws-sdk/*</code> は Lambda ランタイムに含まれるため、バンドルから除外してパッケージサイズを削減する。</p>
+
+      <h3 id="iam-auth">3. RDS Proxy IAM 認証対応</h3>
+
+      <p><code>DATABASE_USE_IAM_AUTH</code> 環境変数で開発環境と本番環境の DB 接続を切り替える:</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th></th><th>開発環境</th><th>本番環境 (Lambda)</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>DATABASE_USE_IAM_AUTH</code></td>
+              <td>未設定 (<code>false</code>)</td>
+              <td><code>true</code></td>
+            </tr>
+            <tr>
+              <td>接続先</td>
+              <td>ローカル MySQL (Docker)</td>
+              <td>RDS Proxy</td>
+            </tr>
+            <tr>
+              <td>認証</td>
+              <td>パスワード(同期的に初期化)</td>
+              <td>IAM トークン(非同期で初期化)</td>
+            </tr>
+            <tr>
+              <td>コネクション数</td>
+              <td>10</td>
+              <td>1(RDS Proxy がプールを管理)</td>
+            </tr>
+            <tr>
+              <td>SSL</td>
+              <td>不要</td>
+              <td>必須(<code>ssl: { rejectUnauthorized: true }</code>)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><code>src/config/database.ts</code> で <code>DATABASE_USE_IAM_AUTH</code> が <code>false</code>(開発環境)の場合はモジュール読み込み時に同期的にプールを作成する。<code>true</code>(本番)の場合は <code>initDatabase()</code> で <code>@aws-sdk/rds-signer</code> を動的インポートして IAM トークンを生成する。</p>
+
+<pre><code class="language-typescript">// 開発環境: db はモジュール読み込み時に初期化済み → そのまま使える
+// 本番環境: Lambda エントリーポイントが initDatabase() を呼んでから使う
+import { db } from '../config/database';</code></pre>
+
+      <p>ESM の live binding により、<code>initDatabase()</code> で <code>db</code> が代入された後は各モジュールから最新の値が参照されるため、既存の import をそのまま使える。</p>
+
+      <h3 id="sqs-worker-handler">4. SQS ワーカーハンドラーの作成(TODO)</h3>
+
+      <p><code>backend/src/sqs-handler.ts</code> で SQS イベントを受け取り QR コード生成処理を実行。</p>
+
+      <h3 id="migration-handler">5. マイグレーション / 日次レポートハンドラーの作成(TODO)</h3>
+
+      <p>それぞれ <code>backend/src/migrate.ts</code>、<code>backend/src/daily-report.ts</code> を作成。</p>
+
+      <h2 id="deploy">デプロイ方式</h2>
+
+      <p>Terraform は初回のインフラ構築のみ担当。Lambda 関数のコードデプロイは GitHub Actions で行う。</p>
+
+<pre class="diagram"><code>Terraform:
+  - Lambda 関数をダミー ZIP で作成
+  - lifecycle { ignore_changes = [filename, source_code_hash] }
+
+GitHub Actions:
+  1. npm run build:lambda
+  2. zip -j lambda.zip dist/lambda.js
+  3. aws lambda update-function-code --function-name {name} --zip-filefile://lambda.zip</code></pre>
+
+      <p>SSM Parameter Store に各 Lambda 関数名を保存しているため、GitHub Actions から参照可能。</p>
+
+      <h2 id="cost">コスト比較(概算)</h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>項目</th><th>移行前(月額)</th><th>移行後(月額)</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>ALB</td><td>~$16</td><td>$0</td></tr>
+            <tr><td>ECS Fargate (Web)</td><td>~$30</td><td>$0</td></tr>
+            <tr><td>ECS Fargate (Worker)</td><td>~$8</td><td>$0</td></tr>
+            <tr><td>Lambda (10万リクエスト/月)</td><td>$0</td><td>~$0.42</td></tr>
+            <tr><td>API Gateway REST API</td><td>$0</td><td>~$0.35</td></tr>
+            <tr><td>RDS Proxy</td><td>$0</td><td>~$5.40</td></tr>
+            <tr><td>Secrets Manager</td><td>$0</td><td>~$0.40</td></tr>
+            <tr><td><strong>合計</strong></td><td><strong>~$54</strong></td><td><strong>~$6.57</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>NAT Gateway (~$32/月) は両方とも共通のため比較から除外。</p>
+
+      <h2 id="api-gateway-choice">API Gateway: HTTP API vs REST API</h2>
+
+      <p>API Gateway には <strong>HTTP API</strong> と <strong>REST API</strong> の2種類がある。本プロジェクトでは <strong>REST API</strong> を採用した。</p>
+
+      <h3 id="api-gateway-compare">比較</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th></th><th>HTTP API</th><th>REST API</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Terraform リソース</td>
+              <td><code>aws_apigatewayv2_api</code></td>
+              <td><code>aws_api_gateway_rest_api</code></td>
+            </tr>
+            <tr>
+              <td>料金(100万リクエストあたり)</td>
+              <td>$1.00</td>
+              <td>$3.50</td>
+            </tr>
+            <tr>
+              <td>レイテンシ</td>
+              <td>低い</td>
+              <td>比較的高い</td>
+            </tr>
+            <tr>
+              <td>Lambda プロキシ統合</td>
+              <td>対応</td>
+              <td>対応</td>
+            </tr>
+            <tr>
+              <td>リクエスト/レスポンス変換</td>
+              <td>非対応</td>
+              <td>対応</td>
+            </tr>
+            <tr>
+              <td>API キー・使用量プラン</td>
+              <td><strong>非対応</strong></td>
+              <td><strong>対応</strong></td>
+            </tr>
+            <tr>
+              <td>リソースポリシー</td>
+              <td><strong>非対応</strong></td>
+              <td><strong>対応</strong></td>
+            </tr>
+            <tr>
+              <td>キャッシュ機能</td>
+              <td>非対応</td>
+              <td>対応</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="why-rest-api">REST API を選んだ理由</h3>
+
+      <p>コストだけを見れば HTTP API($1.00/100万リクエスト)の方が安い。しかし本構成では <strong>CloudFront の WAF を迂回させない</strong>ことが重要であり、REST API を選択した。</p>
+
+      <h4>CloudFront 経由を強制する必要性</h4>
+
+      <p>API Gateway にはデフォルトドメイン(<code>{id}.execute-api.{region}.amazonaws.com</code>)が付与される。CloudFront に WAF(レート制限等)を設定していても、攻撃者がこのドメインに直接アクセスすれば WAF を完全にバイパスできてしまう。</p>
+
+      <h4>HTTP API の場合の問題</h4>
+
+      <p>HTTP API にはリソースポリシーや API キー機能がないため、CloudFront 経由かどうかを <strong>API Gateway レベルで判定できない</strong>。アプリケーション(Lambda)側のミドルウェアで検証するしかないが、この場合:</p>
+
+      <ol>
+        <li>不正リクエストでも <strong>Lambda が起動する</strong> → コスト発生</li>
+        <li>大量リクエストで <strong>Lambda の同時実行数を消費</strong> → 正規リクエストにも影響</li>
+        <li>CloudFront WAF のレート制限が <strong>完全に無意味</strong>になる</li>
+      </ol>
+
+      <h4>REST API の解決策</h4>
+
+      <p>REST API の <strong>API キー機能</strong>を使うことで、API Gateway レベルで不正リクエストを拒否できる:</p>
+
+      <ol>
+        <li>CloudFront がオリジンリクエストに <code>x-api-key</code> ヘッダー(シークレット値)を付与</li>
+        <li>REST API の全メソッドに <code>api_key_required = true</code> を設定</li>
+        <li>API キーが無い/不正なリクエスト → <strong>403 Forbidden</strong>(Lambda に到達しない)</li>
+      </ol>
+
+<pre class="diagram"><code>CloudFront 経由:  CloudFront → x-api-key付与 → API Gateway → 認証OK → Lambda
+直接アクセス:     攻撃者 → API Gateway → API キー無し → 403 (Lambdaは起動しない)</code></pre>
+
+      <p>料金差(月10万リクエストで約$0.25)と引き換えに、WAF のセキュリティを確実に機能させる構成となる。</p>
+
+      <h2 id="notes">注意事項</h2>
+
+      <ol>
+        <li><strong>タイムアウト</strong>: API Gateway + Lambda は最大30秒。長時間かかる API がないか確認が必要</li>
+        <li><strong>コールドスタート</strong>: VPC Lambda + Node.js は通常1-3秒。必要なら Provisioned Concurrency を検討</li>
+        <li><strong>レスポンスサイズ</strong>: Lambda のレスポンスは最大6MB(ストリーミングで20MB)</li>
+        <li><strong>セッション Cookie</strong>: CloudFront 経由のパスベースルーティング(<code>/api/*</code>)のため、Cookie は問題なく動作</li>
+        <li><strong>NAT Gateway</strong>: Lambda VPC から外部サービス(Google OAuth、SES 等)へのアクセスに引き続き必要</li>
+      </ol>
+    </main>
+  </div>
+
+  <!-- Prism.js (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+</body>
+</html>

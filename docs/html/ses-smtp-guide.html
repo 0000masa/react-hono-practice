@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AWS SES メール送信ガイド</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" media="(prefers-color-scheme: light)">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" media="(prefers-color-scheme: dark)">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <h2>このページ</h2>
+      <ul>
+        <li>
+          <a href="#project-setup">本プロジェクトの構成</a>
+          <ul>
+            <li><a href="#mail-files" class="toc-h3">メール送信処理のファイル一覧</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#smtp-what">SMTP とは</a>
+          <ul>
+            <li><a href="#ports" class="toc-h3">ポート番号</a></li>
+            <li><a href="#starttls" class="toc-h3">STARTTLS とは</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#smtp-flow">SMTP でメールを送る仕組み</a>
+          <ul>
+            <li><a href="#step-details" class="toc-h3">ステップの詳細</a></li>
+            <li><a href="#smtp-auth" class="toc-h3">SMTP 認証とは</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#ses-methods">AWS SES の 2 つの送信方法</a>
+          <ul>
+            <li><a href="#comparison" class="toc-h3">比較表</a></li>
+            <li><a href="#project-choice" class="toc-h3">本プロジェクトの選択</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#smtp-iam-relation">SES SMTP 認証情報と IAM ユーザーの関係</a>
+          <ul>
+            <li><a href="#smtp-cred-create" class="toc-h3">SMTP 認証情報の作成で何が起きるか</a></li>
+            <li><a href="#key-mapping" class="toc-h3">アクセスキーと SMTP 認証情報の対応</a></li>
+            <li><a href="#why-access-key" class="toc-h3">なぜアクセスキーが必要なのか</a></li>
+            <li><a href="#when-used" class="toc-h3">どのタイミングで必要か</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#aws-setup">AWS 側のセットアップ手順</a>
+          <ul>
+            <li><a href="#step-verify" class="toc-h3">ステップ 1: ドメイン/メールアドレスの検証</a></li>
+            <li><a href="#step-iam" class="toc-h3">ステップ 2: IAM ロールに SES 権限</a></li>
+            <li><a href="#step-sandbox" class="toc-h3">ステップ 3: サンドボックスの解除</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#hono-config">Hono バックエンドでの設定</a>
+          <ul>
+            <li><a href="#env-vars" class="toc-h3">環境変数</a></li>
+            <li><a href="#mail-ts" class="toc-h3">mail.ts の実装</a></li>
+            <li><a href="#prod-env" class="toc-h3">本番環境の環境変数例</a></li>
+            <li><a href="#dev-env" class="toc-h3">開発環境の環境変数例</a></li>
+          </ul>
+        </li>
+        <li><a href="#auth-diff">SDK / SES API と SMTP 方式の認証の違い</a></li>
+      </ul>
+    </aside>
+
+    <main class="content">
+      <nav class="breadcrumb" aria-label="breadcrumb">
+        <a href="../../README.md">プロジェクト</a>
+        <span class="breadcrumb-sep">/</span>
+        <span>docs</span>
+        <span class="breadcrumb-sep">/</span>
+        <span>ses-smtp-guide</span>
+      </nav>
+
+      <h1>AWS SES メール送信ガイド</h1>
+
+      <h2 id="project-setup">本プロジェクトの構成</h2>
+
+      <p>本プロジェクトでは <strong>SDK / SES API</strong> を使ったやり方でメールを送信している。</p>
+
+      <ul>
+        <li><strong>開発環境</strong>: Mailpit(Docker Compose のローカル SMTP サーバー)で Nodemailer 経由で送信</li>
+        <li><strong>本番環境</strong>: AWS SDK(<code>@aws-sdk/client-ses</code>)で SES API を直接呼び出して送信(Lambda + IAM ロール認証)</li>
+      </ul>
+
+      <p><code>SES_REGION</code> 環境変数が設定されていれば SES SDK、未設定なら Nodemailer SMTP という分岐で、同じコードが開発/本番の両方で動作する。</p>
+
+      <h3 id="mail-files">メール送信処理のファイル一覧</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>ファイル</th><th>役割</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>backend/src/config/mail.ts</code></td>
+              <td>メール送信関数(SES SDK / Nodemailer の分岐ロジック)</td>
+            </tr>
+            <tr>
+              <td><code>backend/src/services/mail.service.ts</code></td>
+              <td>メール送信サービス(HTML テンプレート生成 + 送信関数の呼び出し)</td>
+            </tr>
+            <tr>
+              <td><code>backend/src/controllers/mail.controller.ts</code></td>
+              <td>メール送信 API エンドポイント(バリデーション + サービス呼び出し)</td>
+            </tr>
+            <tr>
+              <td><code>terraform/modules/app-infrastructure/lambda.tf</code></td>
+              <td>Lambda の SES 環境変数設定(<code>SES_REGION</code>, <code>MAIL_FROM</code>)</td>
+            </tr>
+            <tr>
+              <td><code>terraform/modules/app-infrastructure/lambda-notification.tf</code></td>
+              <td>エラー通知メール Lambda(Python / boto3 SES SDK)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <hr>
+
+      <h2 id="smtp-what">SMTP とは</h2>
+
+      <p><strong>SMTP(Simple Mail Transfer Protocol)</strong> は、メールを送信するためのインターネット標準プロトコル。1982 年に RFC 821 で定義され、現在も世界中のメールサーバー間で使われている。</p>
+
+      <p>SMTP は「メールを送る」ためのプロトコルであり、「メールを受信する」プロトコル(POP3 / IMAP)とは別物。</p>
+
+      <h3 id="ports">ポート番号</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>ポート</th><th>用途</th><th>暗号化</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>25</td>
+              <td>サーバー間のメール転送(MTA 間)</td>
+              <td>なし(STARTTLS 可)</td>
+            </tr>
+            <tr>
+              <td>587</td>
+              <td>クライアントからの送信(推奨)</td>
+              <td>STARTTLS</td>
+            </tr>
+            <tr>
+              <td>465</td>
+              <td>クライアントからの送信(レガシー)</td>
+              <td>暗黙的 TLS</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="starttls">STARTTLS とは</h3>
+
+      <p><strong>STARTTLS</strong> は、既に確立された平文の TCP 接続を途中から TLS 暗号化接続にアップグレードするための SMTP 拡張機能(RFC 3207)。</p>
+
+      <h4>通信の流れ</h4>
+
+<pre class="diagram"><code>クライアント                          SMTP サーバー
+    │                                    │
+    │── TCP 接続(平文)──────────────→   │  ① まず平文で接続
+    │                                    │
+    │←─ 220 smtp.example.com Ready ────  │  ② サーバーが応答
+    │                                    │
+    │── EHLO client.example.com ───────→ │  ③ クライアントが挨拶
+    │                                    │
+    │←─ 250-STARTTLS ──────────────────  │  ④ サーバーが「STARTTLS 対応」と返答
+    │                                    │
+    │── STARTTLS ──────────────────────→ │  ⑤ クライアントが暗号化を要求
+    │                                    │
+    │←─ 220 Go ahead ─────────────────  │  ⑥ サーバーが了承
+    │                                    │
+    │══ TLS ハンドシェイク ════════════   │  ⑦ ここから暗号化通信に切り替わる
+    │                                    │
+    │── AUTH LOGIN(暗号化済み)────────→ │  ⑧ 認証情報を安全に送信
+    │── MAIL FROM / RCPT TO / DATA ───→ │  ⑨ メールを送信
+    │                                    │</code></pre>
+
+      <h4>暗黙的 TLS(ポート 465)との違い</h4>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>項目</th><th>STARTTLS(ポート 587)</th><th>暗黙的 TLS(ポート 465)</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>接続開始</strong></td>
+              <td>平文で接続し、途中から TLS に切替</td>
+              <td>最初から TLS で接続</td>
+            </tr>
+            <tr>
+              <td><strong>暗号化のタイミング</strong></td>
+              <td>STARTTLS コマンドの後</td>
+              <td>接続直後</td>
+            </tr>
+            <tr>
+              <td><strong>ポート</strong></td>
+              <td>587(推奨)</td>
+              <td>465(レガシー)</td>
+            </tr>
+            <tr>
+              <td><strong>Nodemailer の <code>secure</code></strong></td>
+              <td><code>false</code></td>
+              <td><code>true</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <blockquote>
+        <p><strong>なぜ <code>SMTP_SECURE=false</code> でも安全なのか</strong>: <code>secure=false</code> は「最初から TLS を使わない」という意味であり、「暗号化しない」という意味ではない。ポート 587 では STARTTLS により途中から TLS に切り替わるため、認証情報やメール本文は暗号化された状態で送信される。</p>
+      </blockquote>
+
+      <hr>
+
+      <h2 id="smtp-flow">SMTP でメールを送る仕組み</h2>
+
+      <p>メール送信の全体的な流れは以下の通り。</p>
+
+<pre class="diagram"><code>┌──────────────┐    SMTP     ┌──────────────┐           ┌──────────────┐
+│  Hono        │ ──────────→ │  SMTP サーバー │ ────────→ │  受信者の     │
+│  (Nodemailer)│   認証+送信  │  (AWS SES)   │  メール転送 │  メールサーバー│
+└──────────────┘             └──────────────┘           └──────────────┘</code></pre>
+
+      <h3 id="step-details">ステップの詳細</h3>
+
+      <ol>
+        <li><strong>接続</strong>: Nodemailer が SES の SMTP サーバー(<code>email-smtp.&lt;region&gt;.amazonaws.com:587</code>)に TCP 接続する</li>
+        <li><strong>STARTTLS</strong>: 平文接続から TLS 暗号化接続にアップグレードする</li>
+        <li><strong>SMTP 認証</strong>: ユーザー名とパスワードを送信して認証する(← ここで SMTP 認証情報が必要)</li>
+        <li><strong>メール送信</strong>: <code>MAIL FROM</code>, <code>RCPT TO</code>, <code>DATA</code> コマンドでメールの送信元・宛先・本文を送る</li>
+        <li><strong>切断</strong>: メールが受理されたら接続を閉じる</li>
+      </ol>
+
+      <h3 id="smtp-auth">SMTP 認証とは</h3>
+
+      <p>SMTP 認証(SMTP AUTH)は、メール送信者が「自分は正当な送信者である」ことを証明する仕組み。認証なしだと誰でもメールを送れてしまうため、スパム防止のために必須。</p>
+
+      <p>SES の SMTP サーバーは認証なしの接続を拒否する。</p>
+
+      <hr>
+
+      <h2 id="ses-methods">AWS SES の 2 つの送信方法</h2>
+
+      <p>AWS SES でメールを送る方法は大きく 2 つある。</p>
+
+      <h3 id="comparison">比較表</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>項目</th><th>SMTP</th><th>SDK / SES API</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>プロトコル</strong></td>
+              <td>SMTP(メール標準プロトコル)</td>
+              <td>HTTPS(AWS API)</td>
+            </tr>
+            <tr>
+              <td><strong>認証方式</strong></td>
+              <td>SMTP ユーザー名 + パスワード</td>
+              <td>IAM ロール or アクセスキー(署名 v4)</td>
+            </tr>
+            <tr>
+              <td><strong>必要なライブラリ</strong></td>
+              <td>Nodemailer(汎用 SMTP クライアント)</td>
+              <td><code>@aws-sdk/client-ses</code>(AWS 専用)</td>
+            </tr>
+            <tr>
+              <td><strong>AWS への依存度</strong></td>
+              <td>低い(SMTP は汎用プロトコル)</td>
+              <td>高い(AWS SDK に依存)</td>
+            </tr>
+            <tr>
+              <td><strong>設定の手軽さ</strong></td>
+              <td>環境変数 4〜5 個で完了</td>
+              <td>IAM ロール/ポリシー設定が必要</td>
+            </tr>
+            <tr>
+              <td><strong>Lambda との相性</strong></td>
+              <td>△(SMTP はステートフル接続)</td>
+              <td>◎(HTTPS ベースで Lambda 向き)</td>
+            </tr>
+            <tr>
+              <td><strong>ローカル開発</strong></td>
+              <td>◎(Mailpit 等の SMTP サーバーで代替可)</td>
+              <td>△(LocalStack 等が必要)</td>
+            </tr>
+            <tr>
+              <td><strong>送信速度</strong></td>
+              <td>やや遅い(TCP 接続 + TLS ハンドシェイク)</td>
+              <td>速い(HTTP/2 対応)</td>
+            </tr>
+            <tr>
+              <td><strong>移植性</strong></td>
+              <td>高い(SES 以外の SMTP にも切替可能)</td>
+              <td>低い(AWS 専用コード)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="project-choice">本プロジェクトの選択</h3>
+
+      <p>本プロジェクトでは <strong>SDK / SES API 方式</strong>を本番環境で採用している。理由:</p>
+
+      <ul>
+        <li><strong>Lambda との相性が良い</strong>: HTTPS ベースなので、Lambda のステートレスな実行モデルに適している</li>
+        <li><strong>IAM ロールで認証</strong>: Lambda に付与された IAM ロールが自動で使われるため、SMTP ユーザー名/パスワードの管理が不要</li>
+        <li><strong>SMTP 認証情報のローテーション不要</strong>: IAM ロールは自動で認証情報が更新される</li>
+      </ul>
+
+      <p>一方、<strong>開発環境では Mailpit(SMTP)</strong> を使用している。理由:</p>
+
+      <ul>
+        <li>Docker Compose で手軽に起動できる</li>
+        <li>送信メールを Web UI(http://localhost:8025)で確認できる</li>
+        <li>AWS アカウントや SES の設定が不要</li>
+      </ul>
+
+<pre class="diagram"><code>開発環境
+  └─ Mailpit(Docker Compose)← Nodemailer SMTP
+
+本番環境(Lambda)
+  └─ AWS SES ← SDK / SES API(本プロジェクトはこちら)</code></pre>
+
+      <hr>
+
+      <h2 id="smtp-iam-relation">SES SMTP 認証情報と IAM ユーザーの関係</h2>
+
+      <blockquote>
+        <p>本プロジェクトでは SDK/SES API 方式を使用しているため、この SMTP 認証情報は不要。SMTP 方式を使う場合のみ必要となる知識として記載する。</p>
+      </blockquote>
+
+      <h3 id="smtp-cred-create">「SMTP 認証情報の作成」で何が起きるか</h3>
+
+      <p>SES コンソールの「SMTP 設定」→「SMTP 認証情報の作成」ボタンを押すと、以下が自動的に行われる。</p>
+
+      <ol>
+        <li><strong>IAM ユーザーが作成される</strong>(例: <code>ses-smtp-user.20260403-123456</code>)</li>
+        <li>そのユーザーに <strong><code>ses:SendRawEmail</code> 権限を持つポリシー</strong>がアタッチされる</li>
+        <li>そのユーザーの <strong>IAM アクセスキー</strong>が生成される</li>
+        <li>アクセスキーのシークレットキーから <strong>SMTP パスワードが導出される</strong></li>
+      </ol>
+
+      <p>つまり、「SMTP 認証情報の作成」=「SES 送信権限付きの IAM ユーザーを作成してアクセスキーを発行する」ということ。</p>
+
+      <h3 id="key-mapping">アクセスキーと SMTP 認証情報の対応</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>IAM 側</th><th>SMTP 側</th><th>説明</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>アクセスキー ID</td>
+              <td>SMTP ユーザー名</td>
+              <td>そのまま使う</td>
+            </tr>
+            <tr>
+              <td>シークレットアクセスキー</td>
+              <td>SMTP パスワード</td>
+              <td><strong>変換アルゴリズムで導出</strong>(元の値とは異なる)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <blockquote>
+        <p><strong>重要</strong>: SMTP パスワードはシークレットアクセスキーそのものではない。AWS 独自のアルゴリズム(HMAC-SHA256 ベース)で変換された値。SES コンソールで認証情報を作成すると、変換済みの SMTP パスワードが表示される。</p>
+      </blockquote>
+
+      <h3 id="why-access-key">なぜアクセスキーが必要なのか</h3>
+
+      <p>SMTP は AWS 独自のプロトコルではなく、汎用的なメール送信プロトコル。SMTP の認証は「ユーザー名 + パスワード」で行われる。</p>
+
+      <p>一方、AWS のサービスは通常 IAM(アクセスキー + 署名 v4)で認証する。</p>
+
+      <p>この 2 つの認証方式を橋渡しするために、以下の仕組みになっている。</p>
+
+<pre class="diagram"><code>SMTP クライアント                AWS SES SMTP サーバー
+(Nodemailer)                    (email-smtp.xxx.amazonaws.com)
+
+  SMTP ユーザー名 ──────────→  アクセスキー ID として検証
+  SMTP パスワード ──────────→  シークレットキーに逆変換して IAM 認証</code></pre>
+
+      <p>つまり、SES の SMTP サーバーは裏側で <strong>SMTP 認証を IAM 認証に変換している</strong>。アクセスキーが必要なのは、この変換のため。</p>
+
+      <h3 id="when-used">どのタイミングで必要か</h3>
+
+      <p>SMTP 認証情報が使われるタイミングは、<strong>Nodemailer が SES の SMTP サーバーに接続する瞬間</strong>。具体的には、<code>transporter.sendMail()</code> を呼んだとき。</p>
+
+<pre class="diagram"><code>sendMail() 呼び出し
+  → TCP 接続(ポート 587)
+  → STARTTLS
+  → AUTH LOGIN(← ここで SMTP ユーザー名 + パスワードを送信)
+  → MAIL FROM / RCPT TO / DATA
+  → 送信完了</code></pre>
+
+      <p>環境変数に設定しておけば、Nodemailer が自動的に認証を行う。</p>
+
+      <hr>
+
+      <h2 id="aws-setup">AWS 側のセットアップ手順</h2>
+
+      <h3 id="step-verify">ステップ 1: ドメインまたはメールアドレスの検証</h3>
+
+      <p>SES でメールを送るには、送信元のドメインまたはメールアドレスを検証する必要がある。</p>
+
+      <ol>
+        <li>SES コンソール → 「検証済み ID」→「ID の作成」</li>
+        <li>ドメインの場合: DNS に DKIM レコード(CNAME × 3)を追加</li>
+        <li>メールアドレスの場合: 検証メール内のリンクをクリック</li>
+      </ol>
+
+<pre class="diagram"><code>ドメイン検証の場合、以下の DNS レコードを追加:
+
+xxxx._domainkey.example.com  CNAME  xxxx.dkim.amazonses.com
+yyyy._domainkey.example.com  CNAME  yyyy.dkim.amazonses.com
+zzzz._domainkey.example.com  CNAME  zzzz.dkim.amazonses.com</code></pre>
+
+      <h3 id="step-iam">ステップ 2: IAM ロールに SES 送信権限を付与(SDK 方式)</h3>
+
+      <p>Lambda の実行ロールに <code>ses:SendEmail</code> と <code>ses:SendRawEmail</code> の権限を追加する。</p>
+
+<pre><code class="language-json">{
+  "Effect": "Allow",
+  "Action": [
+    "ses:SendEmail",
+    "ses:SendRawEmail"
+  ],
+  "Resource": "*"
+}</code></pre>
+
+      <p>本プロジェクトでは Terraform の Lambda 実行ロールモジュールでこの権限を管理している。</p>
+
+      <h3 id="step-sandbox">ステップ 3: サンドボックスの解除(本番用)</h3>
+
+      <p>デフォルトでは SES は「サンドボックスモード」で、検証済みのアドレスにしか送信できない。</p>
+
+      <ol>
+        <li>SES コンソール → 「アカウントダッシュボード」</li>
+        <li>「本番アクセスのリクエスト」をクリック</li>
+        <li>送信上限、ユースケースなどを入力して申請</li>
+        <li>AWS の審査後(通常 24 時間以内)、任意のアドレスに送信可能になる</li>
+      </ol>
+
+      <hr>
+
+      <h2 id="hono-config">Hono バックエンドでの設定</h2>
+
+      <h3 id="env-vars">環境変数</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>変数名</th><th>説明</th><th>開発環境</th><th>本番環境(SES SDK)</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>SES_REGION</code></td>
+              <td>SES リージョン</td>
+              <td>(空 = SMTP 使用)</td>
+              <td><code>ap-northeast-1</code></td>
+            </tr>
+            <tr>
+              <td><code>MAIL_FROM</code></td>
+              <td>送信元アドレス</td>
+              <td><code>noreply@example.com</code></td>
+              <td>SES で検証済みのアドレス</td>
+            </tr>
+            <tr>
+              <td><code>SMTP_HOST</code></td>
+              <td>SMTP ホスト(開発用)</td>
+              <td><code>mailpit</code></td>
+              <td>(不要)</td>
+            </tr>
+            <tr>
+              <td><code>SMTP_PORT</code></td>
+              <td>SMTP ポート(開発用)</td>
+              <td><code>1025</code></td>
+              <td>(不要)</td>
+            </tr>
+            <tr>
+              <td><code>SMTP_SECURE</code></td>
+              <td>暗黙的 TLS(開発用)</td>
+              <td><code>false</code></td>
+              <td>(不要)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><code>SES_REGION</code> が設定されていれば SES SDK を使い、未設定なら Nodemailer SMTP を使う。</p>
+
+      <h3 id="mail-ts">mail.ts の実装</h3>
+
+<pre><code class="language-typescript">import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
+import nodemailer from 'nodemailer';
+import { env } from './env';
+
+// SES_REGION が設定されていれば SES SDK を使う
+const sesClient = env.SES_REGION
+  ? new SESClient({ region: env.SES_REGION })
+  : null;
+
+// SES SDK が使えない場合(開発環境)は Nodemailer SMTP
+const smtpTransporter = !sesClient
+  ? nodemailer.createTransport({
+      host: env.SMTP_HOST,
+      port: env.SMTP_PORT,
+      secure: env.SMTP_SECURE,
+    })
+  : null;
+
+export async function sendEmail(options: {
+  from: string;
+  to: string;
+  subject: string;
+  html: string;
+}): Promise&lt;void&gt; {
+  if (sesClient) {
+    // 本番環境: SES SDK
+    await sesClient.send(
+      new SendEmailCommand({
+        Source: options.from,
+        Destination: { ToAddresses: [options.to] },
+        Message: {
+          Subject: { Data: options.subject, Charset: 'UTF-8' },
+          Body: { Html: { Data: options.html, Charset: 'UTF-8' } },
+        },
+      }),
+    );
+  } else {
+    // 開発環境: Nodemailer SMTP(Mailpit)
+    await smtpTransporter!.sendMail({
+      from: options.from,
+      to: options.to,
+      subject: options.subject,
+      html: options.html,
+    });
+  }
+}</code></pre>
+
+      <h3 id="prod-env">本番環境の環境変数例(Lambda)</h3>
+
+<pre><code class="language-bash">SES_REGION=ap-northeast-1
+MAIL_FROM=noreply@mail.example.com</code></pre>
+
+      <h3 id="dev-env">開発環境の環境変数例(.env)</h3>
+
+<pre><code class="language-bash">SMTP_HOST=mailpit
+SMTP_PORT=1025
+SMTP_SECURE=false
+MAIL_FROM=noreply@example.com
+# SES_REGION は未設定 → Nodemailer SMTP が使われる</code></pre>
+
+      <hr>
+
+      <h2 id="auth-diff">SDK / SES API と SMTP 方式の認証の違い</h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>項目</th><th>SMTP 方式</th><th>SDK / SES API 方式</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>認証に必要なもの</strong></td>
+              <td>SMTP ユーザー名 + パスワード</td>
+              <td>IAM ロール or アクセスキー</td>
+            </tr>
+            <tr>
+              <td><strong>Lambda での認証</strong></td>
+              <td>環境変数に SMTP 認証情報を設定</td>
+              <td>IAM ロールが自動で使われる(設定不要)</td>
+            </tr>
+            <tr>
+              <td><strong>認証情報の管理</strong></td>
+              <td>SMTP パスワードを安全に保管する必要あり</td>
+              <td>IAM ロールなら認証情報の管理が不要</td>
+            </tr>
+            <tr>
+              <td><strong>ローテーション</strong></td>
+              <td>IAM アクセスキーのローテーション時に SMTP パスワードも再生成</td>
+              <td>IAM ロールなら自動</td>
+            </tr>
+            <tr>
+              <td><strong>セキュリティ</strong></td>
+              <td>SMTP パスワードの漏洩リスクあり</td>
+              <td>IAM ロールは一時的な認証情報を自動発行</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <!-- Prism.js (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+</body>
+</html>

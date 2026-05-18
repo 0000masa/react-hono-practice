@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API 仕様書</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" media="(prefers-color-scheme: light)">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" media="(prefers-color-scheme: dark)">
+</head>
+<body>
+  <div class="layout">
+    <!-- ============================ SIDEBAR ============================ -->
+    <aside class="sidebar">
+      <h2>このページ</h2>
+      <ul>
+        <li>
+          <a href="#authentication">認証</a>
+          <ul>
+            <li><a href="#google-oauth-redirect" class="toc-h3">Google OAuth リダイレクト</a></li>
+            <li><a href="#google-oauth-callback" class="toc-h3">Google OAuth コールバック</a></li>
+            <li><a href="#get-authenticated-user" class="toc-h3">認証済みユーザー取得</a></li>
+            <li><a href="#logout" class="toc-h3">ログアウト</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#users">ユーザー</a>
+          <ul>
+            <li><a href="#users-list" class="toc-h3">ユーザー一覧</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#qrcodes">QR コード</a>
+          <ul>
+            <li><a href="#qrcodes-list" class="toc-h3">QR コード一覧</a></li>
+            <li><a href="#qrcodes-create-sync" class="toc-h3">QR コード生成 (同期)</a></li>
+            <li><a href="#qrcodes-create-async" class="toc-h3">QR コード生成 (非同期)</a></li>
+            <li><a href="#qrcodes-status" class="toc-h3">QR コードステータス確認</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#mail">メール</a>
+          <ul>
+            <li><a href="#mail-send" class="toc-h3">メール送信</a></li>
+          </ul>
+        </li>
+        <li><a href="#healthcheck">ヘルスチェック</a></li>
+        <li>
+          <a href="#common-errors">共通エラーレスポンス</a>
+          <ul>
+            <li><a href="#error-auth" class="toc-h3">認証エラー (401)</a></li>
+            <li><a href="#error-validation" class="toc-h3">バリデーションエラー (422)</a></li>
+            <li><a href="#error-server" class="toc-h3">サーバーエラー (500)</a></li>
+          </ul>
+        </li>
+      </ul>
+    </aside>
+
+    <!-- ============================ CONTENT ============================ -->
+    <main class="content">
+      <nav class="breadcrumb" aria-label="breadcrumb">
+        <a href="../../README.md">プロジェクト</a>
+        <span class="breadcrumb-sep">/</span>
+        <span>docs</span>
+        <span class="breadcrumb-sep">/</span>
+        <span>api-specification</span>
+      </nav>
+
+      <h1>API 仕様書</h1>
+
+      <p>ベース URL: <code>/api</code></p>
+
+      <h2 id="authentication">認証</h2>
+
+      <h3 id="google-oauth-redirect">Google OAuth リダイレクト</h3>
+
+<pre class="diagram"><code>GET /api/auth/google</code></pre>
+
+      <p><strong>レスポンス (200):</strong></p>
+
+<pre><code class="language-json">{
+  "url": "https://accounts.google.com/o/oauth2/auth?..."
+}</code></pre>
+
+      <h3 id="google-oauth-callback">Google OAuth コールバック</h3>
+
+<pre class="diagram"><code>GET /api/auth/google/callback?code=...&amp;state=...</code></pre>
+
+      <p><strong>成功時:</strong> <code>FRONTEND_URL/auth/callback</code> へリダイレクト<br>
+      <strong>失敗時:</strong> <code>FRONTEND_URL/auth/error</code> へリダイレクト</p>
+
+      <h3 id="get-authenticated-user">認証済みユーザー取得</h3>
+
+<pre class="diagram"><code>GET /api/auth/user</code></pre>
+
+      <p><strong>認証:</strong> 必要</p>
+
+      <p><strong>レスポンス (200):</strong></p>
+
+<pre><code class="language-json">{
+  "user": {
+    "id": 1,
+    "name": "John Doe",
+    "email": "john@example.com",
+    "avatar_url": "https://lh3.googleusercontent.com/..."
+  }
+}</code></pre>
+
+      <p><strong>レスポンス (401):</strong></p>
+
+<pre><code class="language-json">{
+  "error": "認証が必要です"
+}</code></pre>
+
+      <h3 id="logout">ログアウト</h3>
+
+<pre class="diagram"><code>POST /api/auth/logout</code></pre>
+
+      <p><strong>認証:</strong> 必要</p>
+
+      <p><strong>レスポンス (200):</strong></p>
+
+<pre><code class="language-json">{
+  "message": "ログアウトしました"
+}</code></pre>
+
+      <hr>
+
+      <h2 id="users">ユーザー</h2>
+
+      <h3 id="users-list">ユーザー一覧</h3>
+
+<pre class="diagram"><code>GET /api/users?page=1</code></pre>
+
+      <p><strong>認証:</strong> 必要</p>
+
+      <p><strong>レスポンス (200):</strong></p>
+
+<pre><code class="language-json">{
+  "users": [
+    {
+      "id": 1,
+      "name": "John Doe",
+      "email": "john@example.com",
+      "avatar_url": "https://...",
+      "created_at": "2024-01-15T10:30:00.000Z"
+    }
+  ],
+  "pagination": {
+    "current_page": 1,
+    "last_page": 1,
+    "per_page": 50,
+    "total": 1,
+    "from": 1,
+    "to": 1
+  }
+}</code></pre>
+
+      <hr>
+
+      <h2 id="qrcodes">QR コード</h2>
+
+      <h3 id="qrcodes-list">QR コード一覧</h3>
+
+<pre class="diagram"><code>GET /api/qrcodes?page=1</code></pre>
+
+      <p><strong>認証:</strong> 必要</p>
+
+      <p><strong>レスポンス (200):</strong></p>
+
+<pre><code class="language-json">{
+  "qrcodes": [
+    {
+      "id": 1,
+      "user_id": 1,
+      "user": {
+        "id": 1,
+        "name": "John Doe",
+        "email": "john@example.com"
+      },
+      "file_name": "1_1705318200_507f1f77.png",
+      "url": "http://localhost:9000/qrcodes/1_1705318200_507f1f77.png",
+      "data": "https://example.com",
+      "created_at": "2024-01-15T10:30:00.000Z",
+      "updated_at": "2024-01-15T10:30:00.000Z"
+    }
+  ],
+  "pagination": {
+    "current_page": 1,
+    "last_page": 1,
+    "per_page": 50,
+    "total": 1,
+    "from": 1,
+    "to": 1
+  }
+}</code></pre>
+
+      <h3 id="qrcodes-create-sync">QR コード生成 (同期)</h3>
+
+<pre class="diagram"><code>POST /api/qrcodes
+Content-Type: application/json</code></pre>
+
+      <p><strong>リクエスト:</strong></p>
+
+<pre><code class="language-json">{
+  "data": "https://example.com"
+}</code></pre>
+
+      <p><strong>バリデーション:</strong> <code>data</code> - 必須, 文字列, 最大 1000 文字</p>
+
+      <p><strong>レスポンス (201):</strong></p>
+
+<pre><code class="language-json">{
+  "message": "QRコードを生成しました",
+  "qrcode": {
+    "id": 1,
+    "user_id": 1,
+    "file_name": "1_1705318200_507f1f77.png",
+    "data": "https://example.com",
+    "status": "completed",
+    "created_at": "2024-01-15T10:30:00.000Z",
+    "updated_at": "2024-01-15T10:30:00.000Z",
+    "url": "http://localhost:9000/qrcodes/1_1705318200_507f1f77.png"
+  }
+}</code></pre>
+
+      <p><strong>レスポンス (422):</strong></p>
+
+<pre><code class="language-json">{
+  "error": "バリデーションエラー",
+  "messages": {
+    "data": ["data は必須です"]
+  }
+}</code></pre>
+
+      <h3 id="qrcodes-create-async">QR コード生成 (非同期)</h3>
+
+<pre class="diagram"><code>POST /api/qrcodes/async
+Content-Type: application/json</code></pre>
+
+      <p><strong>リクエスト:</strong></p>
+
+<pre><code class="language-json">{
+  "data": "https://example.com"
+}</code></pre>
+
+      <p><strong>レスポンス (202):</strong></p>
+
+<pre><code class="language-json">{
+  "message": "QRコード生成ジョブをキューに投入しました",
+  "qrcode": {
+    "id": 1,
+    "status": "pending",
+    "data": "https://example.com",
+    "created_at": "2024-01-15T10:30:00.000Z"
+  }
+}</code></pre>
+
+      <h3 id="qrcodes-status">QR コードステータス確認</h3>
+
+<pre class="diagram"><code>GET /api/qrcodes/:id/status</code></pre>
+
+      <p><strong>認証:</strong> 必要</p>
+
+      <p><strong>レスポンス (200 - pending):</strong></p>
+
+<pre><code class="language-json">{
+  "id": 1,
+  "status": "pending",
+  "data": "https://example.com",
+  "created_at": "2024-01-15T10:30:00.000Z",
+  "updated_at": "2024-01-15T10:30:00.000Z"
+}</code></pre>
+
+      <p><strong>レスポンス (200 - completed):</strong></p>
+
+<pre><code class="language-json">{
+  "id": 1,
+  "status": "completed",
+  "data": "https://example.com",
+  "created_at": "2024-01-15T10:30:00.000Z",
+  "updated_at": "2024-01-15T10:35:00.000Z",
+  "url": "http://localhost:9000/qrcodes/1_1705318200_507f1f77.png",
+  "file_name": "1_1705318200_507f1f77.png"
+}</code></pre>
+
+      <p><strong>レスポンス (404):</strong></p>
+
+<pre><code class="language-json">{
+  "error": "QRコードが見つかりません"
+}</code></pre>
+
+      <hr>
+
+      <h2 id="mail">メール</h2>
+
+      <h3 id="mail-send">メール送信</h3>
+
+<pre class="diagram"><code>POST /api/mail/send
+Content-Type: application/json</code></pre>
+
+      <p><strong>認証:</strong> 必要</p>
+
+      <p><strong>リクエスト:</strong></p>
+
+<pre><code class="language-json">{
+  "to": "user@example.com",
+  "subject": "テスト件名",
+  "message": "テスト本文"
+}</code></pre>
+
+      <p><strong>バリデーション:</strong></p>
+      <ul>
+        <li><code>to</code> - 必須, 有効なメールアドレス</li>
+        <li><code>subject</code> - 必須, 最大 255 文字</li>
+        <li><code>message</code> - 必須, 最大 5000 文字</li>
+      </ul>
+
+      <p><strong>レスポンス (200):</strong></p>
+
+<pre><code class="language-json">{
+  "message": "メールを送信しました"
+}</code></pre>
+
+      <hr>
+
+      <h2 id="healthcheck">ヘルスチェック</h2>
+
+<pre class="diagram"><code>GET /api/health</code></pre>
+
+      <p><strong>認証:</strong> 不要</p>
+
+      <p><strong>レスポンス (200):</strong></p>
+
+<pre><code class="language-json">{
+  "status": "ok"
+}</code></pre>
+
+      <hr>
+
+      <h2 id="common-errors">共通エラーレスポンス</h2>
+
+      <h3 id="error-auth">認証エラー (401)</h3>
+
+<pre><code class="language-json">{
+  "error": "認証が必要です"
+}</code></pre>
+
+      <h3 id="error-validation">バリデーションエラー (422)</h3>
+
+<pre><code class="language-json">{
+  "error": "バリデーションエラー",
+  "messages": {
+    "field_name": ["エラーメッセージ"]
+  }
+}</code></pre>
+
+      <h3 id="error-server">サーバーエラー (500)</h3>
+
+<pre><code class="language-json">{
+  "error": "エラーの説明",
+  "message": "詳細なエラーメッセージ"
+}</code></pre>
+    </main>
+  </div>
+
+  <!-- Prism.js (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+</body>
+</html>

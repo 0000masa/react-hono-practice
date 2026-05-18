@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>日次レポートバッチ処理</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" media="(prefers-color-scheme: light)">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" media="(prefers-color-scheme: dark)">
+</head>
+<body>
+  <div class="layout">
+    <!-- ============================ SIDEBAR ============================ -->
+    <aside class="sidebar">
+      <h2>このページ</h2>
+      <ul>
+        <li><a href="#overview">概要</a></li>
+        <li><a href="#flow">全体の処理フロー</a></li>
+        <li>
+          <a href="#related-files">関連ファイルと役割</a>
+          <ul>
+            <li><a href="#app-code" class="toc-h3">アプリケーションコード</a></li>
+            <li><a href="#infra" class="toc-h3">インフラ</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#daily-report-details">daily-report.ts の処理詳細</a>
+          <ul>
+            <li><a href="#db-init" class="toc-h3">DB 接続の初期化</a></li>
+            <li><a href="#yesterday-range" class="toc-h3">前日の期間算出</a></li>
+            <li><a href="#per-user-stats" class="toc-h3">ユーザーごとの集計</a></li>
+            <li><a href="#overall-summary" class="toc-h3">全体サマリーの算出</a></li>
+            <li><a href="#fetch-and-send" class="toc-h3">全ユーザーの取得とメール送信</a></li>
+            <li><a href="#sendmail-internal" class="toc-h3">sendMail の処理</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#mail-content">メールの内容</a>
+          <ul>
+            <li><a href="#mail-subject" class="toc-h3">件名</a></li>
+            <li><a href="#mail-body" class="toc-h3">本文 (HTML)</a></li>
+          </ul>
+        </li>
+        <li><a href="#eventbridge">EventBridge による自動実行</a></li>
+        <li>
+          <a href="#lambda-config">Lambda の設定値</a>
+          <ul>
+            <li><a href="#env-vars" class="toc-h3">環境変数</a></li>
+          </ul>
+        </li>
+        <li><a href="#local-verification">ローカルでの動作確認</a></li>
+      </ul>
+    </aside>
+
+    <!-- ============================ CONTENT ============================ -->
+    <main class="content">
+      <nav class="breadcrumb" aria-label="breadcrumb">
+        <a href="../../README.md">プロジェクト</a>
+        <span class="breadcrumb-sep">/</span>
+        <span>docs</span>
+        <span class="breadcrumb-sep">/</span>
+        <span>daily-report-batch</span>
+      </nav>
+
+      <h1>日次レポートバッチ処理</h1>
+
+      <p>このドキュメントでは、EventBridge + Lambda で毎日自動実行される日次レポートバッチ処理の仕組み、処理フロー、関連ファイルの役割を解説する。</p>
+
+      <hr>
+
+      <h2 id="overview">1. 概要</h2>
+
+      <p>前日の QR コード生成アクティビティをユーザーごとに集計し、サマリーメールを SES で全ユーザーに送信するバッチ処理。EventBridge のスケジュールルールにより毎日 UTC 00:00 (JST 09:00) に自動実行される。</p>
+
+      <hr>
+
+      <h2 id="flow">2. 全体の処理フロー</h2>
+
+<pre class="diagram"><code>EventBridge スケジュール (cron: 毎日 UTC 00:00)
+   │
+   │ Lambda を自動起動
+   ▼
+日次レポート Lambda (daily-report.ts)
+   │
+   │ 1. 前日の期間を JST ベースで算出
+   │ 2. DB から前日の QR コード生成数をユーザーごとに集計
+   │ 3. 全体サマリーを算出
+   │ 4. 全ユーザーを DB から取得
+   │ 5. 各ユーザーに個別メールを送信
+   ▼
+SES / SMTP
+   │
+   │ メール配信
+   ▼
+各ユーザーのメールボックス</code></pre>
+
+      <hr>
+
+      <h2 id="related-files">3. 関連ファイルと役割</h2>
+
+      <h3 id="app-code">アプリケーションコード</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>ファイル</th><th>役割</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>backend/src/daily-report.ts</code></td>
+              <td>日次レポート Lambda のエントリポイント。集計ロジックとメール送信を行う</td>
+            </tr>
+            <tr>
+              <td><code>backend/src/services/mail.service.ts</code></td>
+              <td><code>sendMail()</code> — メール送信の共通関数。HTML テンプレートでラップして送信する</td>
+            </tr>
+            <tr>
+              <td><code>backend/src/config/mail.ts</code></td>
+              <td>SES クライアントまたは SMTP トランスポーターの初期化。<code>SES_REGION</code> が設定されていれば SES、なければ SMTP を使う</td>
+            </tr>
+            <tr>
+              <td><code>backend/src/config/env.ts</code></td>
+              <td><code>SES_REGION</code>, <code>MAIL_FROM</code>, <code>ALERT_EMAIL_TO</code> 環境変数の定義</td>
+            </tr>
+            <tr>
+              <td><code>backend/src/db/schema.ts</code></td>
+              <td><code>users</code>, <code>qrCodes</code> テーブルのスキーマ定義</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="infra">インフラ</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>ファイル</th><th>役割</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>terraform/modules/app-infrastructure/lambda.tf</code></td>
+              <td>日次レポート Lambda の定義、EventBridge → Lambda のパーミッション</td>
+            </tr>
+            <tr>
+              <td><code>terraform/modules/app-infrastructure/eventbridge.tf</code></td>
+              <td>EventBridge スケジュールルールの定義 (該当する場合)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <hr>
+
+      <h2 id="daily-report-details">4. daily-report.ts の処理詳細</h2>
+
+      <h3 id="db-init">4.1 DB 接続の初期化</h3>
+
+<pre><code class="language-typescript">const dbReady = initDatabase();
+
+export const handler = async () =&gt; {
+  await dbReady;</code></pre>
+
+      <p>モジュール読み込み時に <code>initDatabase()</code> を呼び、RDS Proxy への接続を開始する。Lambda のコールドスタート最適化のため、ハンドラー関数の外で接続処理を開始し、ハンドラー内で完了を待つ。</p>
+
+      <h3 id="yesterday-range">4.2 前日の期間算出</h3>
+
+<pre><code class="language-typescript">const now = new Date();
+const jstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+const jstYesterday = new Date(jstNow);
+jstYesterday.setDate(jstYesterday.getDate() - 1);
+
+const startOfDayJST = new Date(
+  jstYesterday.getFullYear(),
+  jstYesterday.getMonth(),
+  jstYesterday.getDate(),
+);
+const endOfDayJST = new Date(
+  jstYesterday.getFullYear(),
+  jstYesterday.getMonth(),
+  jstYesterday.getDate() + 1,
+);
+
+const startUTC = new Date(startOfDayJST.getTime() - 9 * 60 * 60 * 1000);
+const endUTC = new Date(endOfDayJST.getTime() - 9 * 60 * 60 * 1000);</code></pre>
+
+      <p>Lambda の実行環境のタイムゾーンは UTC。「前日」は日本時間 (JST = UTC+9) ベースで算出する必要がある。</p>
+
+      <p><strong>計算の流れ (例: UTC 2026-04-06 00:00 に実行された場合):</strong></p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ステップ</th>
+              <th>値</th>
+              <th>説明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>now</code></td>
+              <td><code>2026-04-06T00:00:00Z</code></td>
+              <td>現在時刻 (UTC)</td>
+            </tr>
+            <tr>
+              <td><code>jstNow</code></td>
+              <td><code>2026-04-06T09:00:00Z</code> (※ Date 内部では UTC だが JST として扱う)</td>
+              <td>UTC に 9 時間加算</td>
+            </tr>
+            <tr>
+              <td><code>jstYesterday</code></td>
+              <td><code>2026-04-05T09:00:00Z</code></td>
+              <td>JST の前日</td>
+            </tr>
+            <tr>
+              <td><code>startOfDayJST</code></td>
+              <td><code>2026-04-05T00:00:00Z</code> (JST の 0 時を表す)</td>
+              <td>前日 JST 0:00</td>
+            </tr>
+            <tr>
+              <td><code>endOfDayJST</code></td>
+              <td><code>2026-04-06T00:00:00Z</code> (JST の翌 0 時を表す)</td>
+              <td>当日 JST 0:00</td>
+            </tr>
+            <tr>
+              <td><code>startUTC</code></td>
+              <td><code>2026-04-04T15:00:00Z</code></td>
+              <td>JST 0:00 → UTC に変換</td>
+            </tr>
+            <tr>
+              <td><code>endUTC</code></td>
+              <td><code>2026-04-05T15:00:00Z</code></td>
+              <td>JST 翌 0:00 → UTC に変換</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>つまり、DB に対するクエリ条件は <code>created_at &gt;= 2026-04-04T15:00:00Z AND created_at &lt; 2026-04-05T15:00:00Z</code> (= JST 4/5 の丸一日) になる。</p>
+
+      <h3 id="per-user-stats">4.3 ユーザーごとの集計</h3>
+
+<pre><code class="language-typescript">const perUserStats = await db
+  .select({
+    userId: qrCodes.userId,
+    userName: users.name,
+    userEmail: users.email,
+    count: count(),
+  })
+  .from(qrCodes)
+  .leftJoin(users, eq(qrCodes.userId, users.id))
+  .where(and(gte(qrCodes.createdAt, startUTC), lt(qrCodes.createdAt, endUTC)))
+  .groupBy(qrCodes.userId, users.name, users.email);</code></pre>
+
+      <p>生成される SQL:</p>
+
+<pre><code class="language-sql">SELECT qr_codes.user_id, users.name, users.email, COUNT(*)
+FROM qr_codes
+LEFT JOIN users ON qr_codes.user_id = users.id
+WHERE qr_codes.created_at &gt;= '2026-04-04 15:00:00'
+  AND qr_codes.created_at &lt; '2026-04-05 15:00:00'
+GROUP BY qr_codes.user_id, users.name, users.email</code></pre>
+
+      <p>結果: 前日に QR コードを生成したユーザーの一覧と、それぞれの生成数が返る。QR コードを生成していないユーザーは結果に含まれない (<code>count</code> が 0 ではなく、行自体がない)。</p>
+
+      <h3 id="overall-summary">4.4 全体サマリーの算出</h3>
+
+<pre><code class="language-typescript">const totalQrCodes = perUserStats.reduce((sum, row) =&gt; sum + row.count, 0);
+const activeUserCount = perUserStats.length;
+const sortedStats = [...perUserStats].sort((a, b) =&gt; b.count - a.count);
+const mostActive = sortedStats[0] ?? null;</code></pre>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>変数</th>
+              <th>意味</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>totalQrCodes</code></td>
+              <td>前日の QR コード総生成数 (全ユーザー合計)</td>
+            </tr>
+            <tr>
+              <td><code>activeUserCount</code></td>
+              <td>前日に QR コードを生成したユーザーの数</td>
+            </tr>
+            <tr>
+              <td><code>mostActive</code></td>
+              <td>最も多く QR コードを生成したユーザー (名前と件数)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="fetch-and-send">4.5 全ユーザーの取得とメール送信</h3>
+
+<pre><code class="language-typescript">const allUsers = await db.select().from(users);
+
+const userCountMap = new Map(
+  perUserStats.map((row) =&gt; [row.userId, row.count]),
+);</code></pre>
+
+      <p><code>allUsers</code> は QR コードを生成したかどうかに関係なく全ユーザーを取得する。<code>userCountMap</code> は <code>userId → 生成数</code> の Map で、QR コードを生成していないユーザーは Map に含まれないため、<code>get()</code> の結果が <code>undefined</code> → <code>?? 0</code> で 0 件として扱う。</p>
+
+<pre><code class="language-typescript">for (const user of allUsers) {
+  const userCount = userCountMap.get(user.id) ?? 0;
+
+  const body = `
+    &lt;h3&gt;${dateStr} のQRコード生成レポート&lt;/h3&gt;
+    &lt;h4&gt;あなたのアクティビティ&lt;/h4&gt;
+    &lt;p&gt;QRコード生成数: &lt;strong&gt;${userCount}件&lt;/strong&gt;&lt;/p&gt;
+    &lt;h4&gt;全体サマリー&lt;/h4&gt;
+    &lt;ul&gt;
+      &lt;li&gt;総QRコード生成数: ${totalQrCodes}件&lt;/li&gt;
+      &lt;li&gt;アクティブユーザー数: ${activeUserCount} / ${allUsers.length}人&lt;/li&gt;
+      ${mostActive ? `&lt;li&gt;最もアクティブなユーザー: ${mostActive.userName} (${mostActive.count}件)&lt;/li&gt;` : ''}
+    &lt;/ul&gt;
+  `;
+
+  try {
+    await sendMail(user.email, subject, body);
+  } catch (error) {
+    console.error(`Failed to send daily report to ${user.email}:`, error);
+  }
+}</code></pre>
+
+      <p>各ユーザーに個別のメールを送信する。メールの内容は:</p>
+
+      <ul>
+        <li><strong>あなたのアクティビティ</strong>: そのユーザー自身の QR コード生成数 (生成していなければ 0 件)</li>
+        <li><strong>全体サマリー</strong>: 全ユーザー共通の統計情報</li>
+      </ul>
+
+      <p><code>sendMail()</code> でエラーが発生しても <code>catch</code> してログに出力し、他のユーザーへの送信を続行する。1 ユーザーへの送信失敗で全体が止まらないようにしている。</p>
+
+      <h3 id="sendmail-internal">4.6 sendMail の処理</h3>
+
+      <p><code>sendMail()</code> は <code>services/mail.service.ts</code> に定義された共通関数。</p>
+
+<pre><code class="language-typescript">export async function sendMail(to, subject, body) {
+  const html = `
+    &lt;!DOCTYPE html&gt;
+    &lt;html&gt;
+    &lt;head&gt;&lt;meta charset="utf-8"&gt;&lt;/head&gt;
+    &lt;body style="..."&gt;
+      &lt;div style="..."&gt;
+        &lt;h2&gt;${subject}&lt;/h2&gt;
+        &lt;div&gt;${body}&lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/body&gt;
+    &lt;/html&gt;
+  `;
+
+  await sendEmail({ from: env.MAIL_FROM, to, subject, html });
+}</code></pre>
+
+      <p>引数の <code>body</code> (HTML 断片) をメールテンプレートでラップし、<code>config/mail.ts</code> の <code>sendEmail()</code> に渡す。<code>sendEmail()</code> は <code>SES_REGION</code> 環境変数の有無で SES と SMTP を切り替える。</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>環境</th>
+              <th>メール送信方法</th>
+              <th>設定</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>本番 (Lambda)</td>
+              <td>AWS SES</td>
+              <td><code>SES_REGION=ap-northeast-1</code></td>
+            </tr>
+            <tr>
+              <td>ローカル (Docker)</td>
+              <td>SMTP (Mailpit)</td>
+              <td><code>SMTP_HOST=mailpit</code>, <code>SMTP_PORT=1025</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <hr>
+
+      <h2 id="mail-content">5. メールの内容</h2>
+
+      <h3 id="mail-subject">件名</h3>
+
+<pre class="diagram"><code>【日次レポート】2026/04/05 QRコード生成サマリー</code></pre>
+
+      <h3 id="mail-body">本文 (HTML)</h3>
+
+      <p>各ユーザーに送信されるメールの本文構成:</p>
+
+<pre class="diagram"><code>2026/04/05 のQRコード生成レポート
+
+あなたのアクティビティ
+  QRコード生成数: 3件      ← ユーザーごとに異なる
+
+全体サマリー
+  ・総QRコード生成数: 15件
+  ・アクティブユーザー数: 4 / 10人
+  ・最もアクティブなユーザー: 田中太郎 (7件)</code></pre>
+
+      <hr>
+
+      <h2 id="eventbridge">6. EventBridge による自動実行</h2>
+
+      <p>Terraform で定義された EventBridge ルールにより、毎日自動で Lambda が起動される。</p>
+
+<pre><code class="language-hcl"># スケジュール式: cron(0 0 * * ? *)
+# 毎日 UTC 00:00(JST 09:00)に実行</code></pre>
+
+      <p>EventBridge は Lambda を直接呼び出すプッシュ型のため、<code>aws_lambda_permission</code> で EventBridge からの呼び出しを許可する設定が必要。</p>
+
+<pre><code class="language-hcl">resource "aws_lambda_permission" "eventbridge_daily_report" {
+  statement_id  = "AllowEventBridgeInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.daily_report.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.daily_report.arn
+}</code></pre>
+
+      <hr>
+
+      <h2 id="lambda-config">7. Lambda の設定値</h2>
+
+      <p>Terraform で定義された日次レポート Lambda の設定:</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>設定</th>
+              <th>値</th>
+              <th>理由</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>memory_size</code></td>
+              <td>512 MB</td>
+              <td>DB クエリとメール送信のみで大きなメモリは不要</td>
+            </tr>
+            <tr>
+              <td><code>timeout</code></td>
+              <td>300 秒 (5 分)</td>
+              <td>ユーザー数が多い場合のメール送信に余裕を持たせる</td>
+            </tr>
+            <tr>
+              <td><code>command</code></td>
+              <td><code>daily-report.handler</code></td>
+              <td><code>daily-report.js</code> の <code>handler</code> 関数を呼ぶ</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="env-vars">環境変数</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>変数</th>
+              <th>用途</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>DATABASE_HOST</code></td>
+              <td>RDS Proxy のエンドポイント</td>
+            </tr>
+            <tr>
+              <td><code>DATABASE_USE_IAM_AUTH</code></td>
+              <td><code>true</code> — IAM 認証でDB接続</td>
+            </tr>
+            <tr>
+              <td><code>SES_REGION</code></td>
+              <td>SES のリージョン (<code>ap-northeast-1</code>)</td>
+            </tr>
+            <tr>
+              <td><code>MAIL_FROM</code></td>
+              <td>送信元メールアドレス</td>
+            </tr>
+            <tr>
+              <td><code>ALERT_EMAIL_TO</code></td>
+              <td>管理者通知用メールアドレス (将来の拡張用)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <hr>
+
+      <h2 id="local-verification">8. ローカルでの動作確認</h2>
+
+      <p>ローカル環境で日次レポートの動作を確認するには、<code>daily-report.ts</code> の <code>handler</code> 関数を直接呼び出すスクリプトを作成するか、<code>tsx</code> で実行する。</p>
+
+<pre><code class="language-bash"># backend ディレクトリで
+npx tsx -e "import { handler } from './src/daily-report'; handler().then(console.log)"</code></pre>
+
+      <p>メールは Mailpit (<code>http://localhost:8025</code>) で確認できる。ただし、DB にユーザーと前日の QR コードデータが存在する必要がある。</p>
+    </main>
+  </div>
+
+  <!-- Prism.js (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+</body>
+</html>

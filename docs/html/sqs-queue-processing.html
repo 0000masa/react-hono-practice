@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SQS キュー処理(QR コード非同期生成)</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" media="(prefers-color-scheme: light)">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" media="(prefers-color-scheme: dark)">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <h2>このページ</h2>
+      <ul>
+        <li><a href="#overview">概要</a></li>
+        <li><a href="#flow">全体の処理フロー</a></li>
+        <li>
+          <a href="#files">関連ファイルと役割</a>
+          <ul>
+            <li><a href="#api-side" class="toc-h3">API 側</a></li>
+            <li><a href="#worker-side" class="toc-h3">Worker 側</a></li>
+            <li><a href="#infra" class="toc-h3">インフラ</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#file-details">各ファイルの詳細</a>
+          <ul>
+            <li><a href="#store-async" class="toc-h3">qrcodes.controller.ts — storeAsync</a></li>
+            <li><a href="#sqs-handler" class="toc-h3">sqs-handler.ts — SQS Worker Lambda</a></li>
+            <li><a href="#generate-and-upload" class="toc-h3">qrcode.service.ts — generateAndUpload</a></li>
+            <li><a href="#status-fn" class="toc-h3">qrcodes.controller.ts — status</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#sqs-lambda-trigger">SQS → Lambda の起動の仕組み</a>
+          <ul>
+            <li><a href="#batch-size" class="toc-h3">batch_size の意味</a></li>
+            <li><a href="#timeout" class="toc-h3">timeout の関係</a></li>
+          </ul>
+        </li>
+        <li><a href="#status-transition">ステータス遷移</a></li>
+        <li><a href="#local-dev">ローカル開発での動作</a></li>
+      </ul>
+    </aside>
+
+    <main class="content">
+      <nav class="breadcrumb" aria-label="breadcrumb">
+        <a href="../../README.md">プロジェクト</a>
+        <span class="breadcrumb-sep">/</span>
+        <span>docs</span>
+        <span class="breadcrumb-sep">/</span>
+        <span>sqs-queue-processing</span>
+      </nav>
+
+      <h1>SQS キュー処理(QR コード非同期生成)</h1>
+
+      <p>このドキュメントでは、SQS キューを使った QR コード非同期生成の仕組み、処理フロー、関連ファイルの役割を解説する。</p>
+
+      <hr>
+
+      <h2 id="overview">1. 概要</h2>
+
+      <p>QR コード生成には画像の描画と S3 へのアップロードが含まれるため、同期処理では API のレスポンスが遅くなる。SQS キューを使い、リクエスト受付(API Lambda)と実際の生成処理(SQS Worker Lambda)を分離することで、クライアントに即座にレスポンスを返す。</p>
+
+      <hr>
+
+      <h2 id="flow">2. 全体の処理フロー</h2>
+
+<pre class="diagram"><code>クライアント
+   │
+   │ POST /api/qrcodes/async { data: "https://example.com" }
+   ▼
+API Lambda (lambda.ts)
+   │
+   │ 1. バリデーション
+   │ 2. DB に status=pending で INSERT
+   │ 3. SQS にメッセージ送信
+   │ 4. 202 Accepted を返す
+   ▼
+SQS キュー (stg-qrcode-generation)
+   │
+   │ AWS が自動で Long Polling
+   │ メッセージを検出すると Lambda を起動
+   ▼
+SQS Worker Lambda (sqs-handler.ts)
+   │
+   │ 1. メッセージから qrCodeId, data, userId を取得
+   │ 2. QR コード画像を生成
+   │ 3. S3 にアップロード
+   │ 4. DB を status=completed に更新
+   ▼
+クライアント
+   │
+   │ GET /api/qrcodes/{id}/status でポーリング
+   │ → status: "completed" になったら url を取得
+   ▼
+完了</code></pre>
+
+      <hr>
+
+      <h2 id="files">3. 関連ファイルと役割</h2>
+
+      <h3 id="api-side">API 側(リクエスト受付)</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>ファイル</th><th>役割</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>backend/src/controllers/qrcodes.controller.ts</code></td>
+              <td><code>storeAsync</code> 関数が SQS にメッセージを送信する。<code>status</code> 関数がポーリングに応答する</td>
+            </tr>
+            <tr>
+              <td><code>backend/src/routes/qrcodes.ts</code></td>
+              <td><code>POST /async</code> と <code>GET /:id/status</code> のルート定義</td>
+            </tr>
+            <tr>
+              <td><code>backend/src/config/env.ts</code></td>
+              <td><code>SQS_QUEUE_URL</code> 環境変数の定義</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="worker-side">Worker 側(QR コード生成)</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>ファイル</th><th>役割</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>backend/src/sqs-handler.ts</code></td>
+              <td>SQS Worker Lambda のエントリポイント。SQS イベントを受け取り QR コードを生成する</td>
+            </tr>
+            <tr>
+              <td><code>backend/src/services/qrcode.service.ts</code></td>
+              <td><code>generateAndUpload()</code> — QR コード画像の生成と S3 アップロードを行う</td>
+            </tr>
+            <tr>
+              <td><code>backend/src/services/storage.service.ts</code></td>
+              <td><code>uploadFile()</code> — S3 へのファイルアップロード</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="infra">インフラ</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>ファイル</th><th>役割</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>terraform/modules/app-infrastructure/sqs.tf</code></td>
+              <td>SQS キューの作成</td>
+            </tr>
+            <tr>
+              <td><code>terraform/modules/app-infrastructure/lambda.tf</code></td>
+              <td>SQS Worker Lambda の定義、SQS → Lambda のイベントソースマッピング</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <hr>
+
+      <h2 id="file-details">4. 各ファイルの詳細</h2>
+
+      <h3 id="store-async">qrcodes.controller.ts — storeAsync 関数</h3>
+
+      <p>クライアントからのリクエストを受け付け、SQS にジョブを投入する。</p>
+
+<pre class="diagram"><code>storeAsync(c) の処理:
+  1. リクエストボディの data フィールドをバリデーション
+  2. DB に qr_codes レコードを INSERT(status: 'pending', fileName: '')
+  3. SQS にメッセージを送信(本番)またはローカルで直接処理(開発)
+  4. 202 Accepted でレスポンスを返す</code></pre>
+
+      <p><strong>SQS 送信部分のコード解説:</strong></p>
+
+<pre><code class="language-typescript">const sqsClient = env.SQS_QUEUE_URL ? new SQSClient({}) : null;</code></pre>
+
+      <ul>
+        <li><code>SQS_QUEUE_URL</code> が設定されている場合のみ SQS クライアントを作成する</li>
+        <li>ローカル開発では空文字なので <code>null</code> になる</li>
+        <li><code>new SQSClient({})</code> は引数が空オブジェクトだが、Lambda 実行環境では IAM ロールの認証情報が自動で使われる</li>
+      </ul>
+
+<pre><code class="language-typescript">if (sqsClient &amp;&amp; env.SQS_QUEUE_URL) {
+  await sqsClient.send(
+    new SendMessageCommand({
+      QueueUrl: env.SQS_QUEUE_URL,
+      MessageBody: JSON.stringify({
+        qrCodeId: result.id,  // DB に INSERT した ID
+        data: body.data!,     // QR コードに埋め込むデータ
+        userId: user.id,      // ファイル名生成に使う
+      }),
+    }),
+  );
+} else {
+  // ローカル開発: fire-and-forget で直接処理
+}</code></pre>
+
+      <ul>
+        <li>本番: SQS にメッセージを送信し、Worker Lambda が後から処理する</li>
+        <li>ローカル: SQS がないので、即時非同期関数(IIFE)でその場で処理する</li>
+      </ul>
+
+      <p><strong>SQS メッセージの内容:</strong></p>
+
+      <p>Worker Lambda がメッセージを受け取ったとき、QR コード生成に必要な情報がすべて含まれている必要がある。</p>
+
+<pre><code class="language-json">{
+  "qrCodeId": 42,
+  "data": "https://example.com",
+  "userId": 1
+}</code></pre>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>フィールド</th><th>用途</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>qrCodeId</code></td>
+              <td>生成完了後に DB の該当レコードを更新するため</td>
+            </tr>
+            <tr>
+              <td><code>data</code></td>
+              <td>QR コード画像に埋め込むテキストデータ</td>
+            </tr>
+            <tr>
+              <td><code>userId</code></td>
+              <td>S3 のファイル名に含める(<code>{userId}_{timestamp}_{uniqId}.png</code>)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="sqs-handler">sqs-handler.ts — SQS Worker Lambda</h3>
+
+      <p>SQS からメッセージを受け取り、QR コード生成を実行する Lambda のエントリポイント。</p>
+
+<pre class="diagram"><code>handler(event) の処理:
+  1. DB 接続完了を待つ
+  2. event.Records をループ(batch_size=1 なので通常 1 件)
+  3. メッセージ body の JSON をパース
+  4. generateAndUpload() で QR コード生成 + S3 アップロード
+  5. DB を fileName + status='completed' に更新
+  6. エラー時は status='failed' に更新</code></pre>
+
+      <p><strong>event.Records のデータ構造:</strong></p>
+
+      <p>SQS → Lambda のイベントソースマッピングで Lambda が呼ばれると、<code>event</code> オブジェクトの <code>Records</code> 配列にメッセージが入る。各レコードの <code>body</code> プロパティに、<code>storeAsync</code> で送信した JSON 文字列が入っている。</p>
+
+<pre><code class="language-typescript">for (const record of event.Records) {
+  const { qrCodeId, data, userId } = JSON.parse(record.body);
+  // ...
+}</code></pre>
+
+      <p><strong>エラー時の挙動:</strong></p>
+
+<pre><code class="language-typescript">catch (error) {
+  console.error(`QR code ${qrCodeId} generation failed:`, error);
+  await db
+    .update(qrCodes)
+    .set({ status: 'failed' })
+    .where(eq(qrCodes.id, qrCodeId));
+}</code></pre>
+
+      <p>エラーが発生しても <code>throw</code> せずに DB を <code>failed</code> に更新して正常終了する。正常終了すると SQS はメッセージを削除する。もし <code>throw</code> すると Lambda の実行が失敗扱いになり、SQS が <code>visibility_timeout</code>(90 秒)後にメッセージを再送するが、同じエラーが繰り返されるだけなので、DB に失敗を記録して終了する方が適切。</p>
+
+      <h3 id="generate-and-upload">qrcode.service.ts — generateAndUpload 関数</h3>
+
+      <p>API Lambda の同期生成(<code>store</code>)と SQS Worker Lambda の非同期生成(<code>sqs-handler</code>)の両方から呼ばれる共通関数。</p>
+
+<pre class="diagram"><code>generateAndUpload(data, userId) の処理:
+  1. qrcode ライブラリで PNG バッファを生成(300x300px)
+  2. ファイル名を生成: {userId}_{UNIXタイムスタンプ}_{ランダム8文字}.png
+  3. S3 にアップロード
+  4. ファイル名を返す</code></pre>
+
+      <h3 id="status-fn">qrcodes.controller.ts — status 関数</h3>
+
+      <p>クライアントがポーリングでステータスを確認するためのエンドポイント。</p>
+
+<pre class="diagram"><code>status(c) の処理:
+  1. URL パラメータから id を取得
+  2. DB から qr_codes レコードを検索
+  3. status が 'completed' かつ fileName がある場合は url と file_name を付与して返す</code></pre>
+
+      <hr>
+
+      <h2 id="sqs-lambda-trigger">5. SQS → Lambda の起動の仕組み</h2>
+
+      <p>Terraform のイベントソースマッピングで SQS と Lambda が接続されている。</p>
+
+<pre><code class="language-hcl">resource "aws_lambda_event_source_mapping" "qrcode_worker" {
+  event_source_arn = aws_sqs_queue.qrcode_generation.arn
+  function_name    = aws_lambda_function.sqs_worker.arn
+  batch_size       = 1
+  enabled          = true
+}</code></pre>
+
+      <p>この設定により、以下の動作が AWS 側で自動的に行われる:</p>
+
+      <ol>
+        <li><strong>AWS Lambda サービスのポーラー</strong>が SQS キューに対して Long Polling を行う</li>
+        <li>メッセージが見つかると Worker Lambda を起動し、メッセージを <code>event.Records</code> として渡す</li>
+        <li>Lambda が正常終了すると、ポーラーがメッセージを SQS から自動削除する</li>
+        <li>Lambda がエラー終了すると、メッセージは <code>visibility_timeout</code>(90 秒)後に再びキューに戻る</li>
+      </ol>
+
+      <p>ポーラーは AWS がマネージドで運用するため、利用者側でコンピュートリソースを用意する必要はない。メッセージがない間は Lambda は起動されず、実行課金も発生しない。</p>
+
+      <h3 id="batch-size">batch_size の意味</h3>
+
+      <p><code>batch_size = 1</code> は、1 回の Lambda 呼び出しで渡すメッセージの最大数。1 なので常に 1 メッセージずつ処理する。</p>
+
+      <h3 id="timeout">timeout の関係</h3>
+
+<pre class="diagram"><code>SQS visibility_timeout: 90 秒
+Lambda timeout:          60 秒</code></pre>
+
+      <p>Lambda の timeout は SQS の <code>visibility_timeout</code> より短くする必要がある。Lambda が処理中にタイムアウトした場合、メッセージは <code>visibility_timeout</code> 経過後にキューに戻り再処理される。もし Lambda の timeout が <code>visibility_timeout</code> より長いと、処理中なのにメッセージが別の Lambda に渡される二重処理が発生する。</p>
+
+      <hr>
+
+      <h2 id="status-transition">6. ステータス遷移</h2>
+
+<pre class="diagram"><code>pending → completed(正常)
+pending → failed(エラー)</code></pre>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>ステータス</th><th>設定タイミング</th><th>設定箇所</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>pending</code></td>
+              <td>API Lambda が DB に INSERT するとき</td>
+              <td><code>qrcodes.controller.ts</code> の <code>storeAsync</code></td>
+            </tr>
+            <tr>
+              <td><code>completed</code></td>
+              <td>Worker Lambda が QR 生成 + S3 アップロード成功後</td>
+              <td><code>sqs-handler.ts</code></td>
+            </tr>
+            <tr>
+              <td><code>failed</code></td>
+              <td>Worker Lambda でエラーが発生したとき</td>
+              <td><code>sqs-handler.ts</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <hr>
+
+      <h2 id="local-dev">7. ローカル開発での動作</h2>
+
+      <p>ローカル環境では SQS がないため、<code>SQS_QUEUE_URL</code> 環境変数が空になる。</p>
+
+<pre><code class="language-typescript">const sqsClient = env.SQS_QUEUE_URL ? new SQSClient({}) : null;</code></pre>
+
+      <p><code>sqsClient</code> が <code>null</code> のとき、<code>storeAsync</code> は SQS を使わず fire-and-forget パターンで直接 <code>generateAndUpload()</code> を呼ぶ。これにより、ローカル環境でも <code>POST /api/qrcodes/async</code> エンドポイントが動作する。</p>
+
+      <p>ローカルでは MinIO(S3 互換のオブジェクトストレージ)が docker-compose で起動しており、QR コード画像はそこに保存される。</p>
+    </main>
+  </div>
+
+  <!-- Prism.js (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+</body>
+</html>

@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>バックエンドテスト戦略ガイド</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" media="(prefers-color-scheme: light)">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" media="(prefers-color-scheme: dark)">
+</head>
+<body>
+  <div class="layout">
+    <!-- ============================ SIDEBAR ============================ -->
+    <aside class="sidebar">
+      <h2>このページ</h2>
+      <ul>
+        <li><a href="#why-split-tests">1. なぜテストを分けるのか</a></li>
+        <li><a href="#test-pyramid">2. テストピラミッド</a></li>
+        <li>
+          <a href="#layer-responsibilities">3. 各レイヤーの責務</a>
+          <ul>
+            <li><a href="#unit-test" class="toc-h3">3.1 単体テスト (Unit Test)</a></li>
+            <li><a href="#integration-test" class="toc-h3">3.2 結合テスト (Integration Test)</a></li>
+            <li><a href="#e2e-test" class="toc-h3">3.3 E2E テスト (End-to-End Test)</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#happy-error-tdd">4. 正常系テスト・異常系テスト・TDD</a>
+          <ul>
+            <li><a href="#happy-vs-error" class="toc-h3">4.1 正常系テストと異常系テスト</a></li>
+            <li><a href="#tdd" class="toc-h3">4.2 TDD (Red-Green-Refactor)</a></li>
+            <li><a href="#failing-test-meanings" class="toc-h3">4.3 まとめ: 「失敗するテスト」の 2 つの意味</a></li>
+          </ul>
+        </li>
+        <li><a href="#cross-framework">5. フレームワーク横断: 粒度の呼び方</a></li>
+        <li><a href="#testable-code-design">6. テストしやすいコードの設計原則</a></li>
+        <li><a href="#mock-stub">7. モック・スタブの考え方</a></li>
+        <li>
+          <a href="#scaling-tests">8. すべてのテストを必ず書く必要はあるか — プロジェクト規模と取捨選択</a>
+          <ul>
+            <li><a href="#conclusion-not-required" class="toc-h3">8.1 結論: 必須ではない。何を守りたいかで決まる</a></li>
+            <li><a href="#patterns-by-scale" class="toc-h3">8.2 規模ごとの典型パターン</a></li>
+            <li><a href="#what-to-write" class="toc-h3">8.3 「これは書く / これは書かなくていい」の判断</a></li>
+            <li><a href="#project-recommendation" class="toc-h3">8.4 本プロジェクトへの推奨ライン</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#project-application">9. 本プロジェクトへの適用</a>
+          <ul>
+            <li><a href="#layer-mapping" class="toc-h3">9.1 レイヤー対応表</a></li>
+            <li><a href="#unit-pseudo" class="toc-h3">9.2 疑似コード: Unit テスト (純粋ロジック)</a></li>
+            <li><a href="#service-unit-pseudo" class="toc-h3">9.3 疑似コード: Service の Unit テスト</a></li>
+            <li><a href="#integration-pseudo" class="toc-h3">9.4 疑似コード: Integration テスト</a></li>
+            <li><a href="#e2e-pseudo" class="toc-h3">9.5 疑似コード: E2E テスト</a></li>
+            <li><a href="#external-deps-policy" class="toc-h3">9.6 外部依存の扱い方針</a></li>
+          </ul>
+        </li>
+        <li><a href="#recommended-tools">10. 推奨ツール</a></li>
+        <li><a href="#where-to-start">11. 何から始めるか</a></li>
+      </ul>
+    </aside>
+
+    <!-- ============================ CONTENT ============================ -->
+    <main class="content">
+      <nav class="breadcrumb" aria-label="breadcrumb">
+        <a href="../../README.md">プロジェクト</a>
+        <span class="breadcrumb-sep">/</span>
+        <span>docs</span>
+        <span class="breadcrumb-sep">/</span>
+        <span>backend-testing-strategy</span>
+      </nav>
+
+      <h1>バックエンドテスト戦略ガイド</h1>
+
+      <p>このドキュメントは <strong>「テストの書き方」ではなく「テストをどの粒度で分けるか」</strong> を解説するものです。Laravel・Hono・Express など特定のフレームワークに依存しない一般論を先に整理し、後半で本プロジェクト (Hono + Drizzle + MySQL + BetterAuth + AWS) への適用例を示します。</p>
+
+      <p>実際のテストコードを書き始める前に、本ドキュメントを読んで「どのレイヤーをどのテスト種別で守るのか」のイメージを持つことを推奨します。</p>
+
+      <hr>
+
+      <h2 id="why-split-tests">1. なぜテストを分けるのか</h2>
+
+      <p>テストには <strong>速さ・壊れにくさ・原因の切り分けやすさ</strong> という相反する性質があり、1 種類のテストだけで全部を満たせません。</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>観点</th>
+              <th>全部を E2E で書くと</th>
+              <th>全部を Unit で書くと</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>速度</td><td>1 本数秒〜十数秒、開発中に回らない</td><td>数百本でも数秒、開発中に常時回せる</td></tr>
+            <tr><td>壊れやすさ</td><td>DB やネットワークの揺らぎで偽陽性</td><td>安定するが、本物の挙動と乖離しがち</td></tr>
+            <tr><td>失敗時の原因特定</td><td>経路が長くて原因がわかりにくい</td><td>失敗箇所がそのままバグ箇所</td></tr>
+            <tr><td>カバーできる範囲</td><td>経路全体・本物の挙動</td><td>個別ロジックのみ、結合バグは取れない</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>そこで <strong>粒度の違うテストを組み合わせる</strong> のが定石です。</p>
+
+      <hr>
+
+      <h2 id="test-pyramid">2. テストピラミッド</h2>
+
+      <p>一般的に推奨される構成は「下が広く、上にいくほど少ない」ピラミッド型です。</p>
+
+<pre class="diagram"><code>        ▲  少
+       ╱E2E╲           ← HTTP リクエストから DB まで通す
+      ╱─────╲
+     ╱結合 (Integration)╲   ← 複数レイヤーをまたぐ
+    ╱──────────────────╲
+   ╱  単体 (Unit)         ╲ ← 1 関数 / 1 メソッド
+  ╱──────────────────────╲
+                          ▼  多</code></pre>
+
+      <p>数の目安は <strong>Unit : Integration : E2E ≒ 70 : 20 : 10</strong> あたりが目安としてよく挙げられますが、厳密な比率より「下にいくほど速くて多い」という性質を保つことが重要です。</p>
+
+      <p>アンチパターン: <strong>アイスクリームコーン型</strong> (E2E ばかり多く、Unit が少ない) は、CI が遅くなり原因切り分けも難しくなるため避けます。</p>
+
+      <hr>
+
+      <h2 id="layer-responsibilities">3. 各レイヤーの責務</h2>
+
+      <h3 id="unit-test">3.1 単体テスト (Unit Test)</h3>
+
+      <ul>
+        <li><strong>対象</strong>: 1 関数・1 メソッド・1 クラス</li>
+        <li><strong>外部依存</strong>: DB・HTTP・ファイル・時計・ランダム値などすべてモック</li>
+        <li><strong>速度</strong>: 1 本あたり 数 ms 〜 10 ms</li>
+        <li><strong>数</strong>: 数百〜数千本書ける</li>
+        <li><strong>狙い</strong>: ビジネスロジックの分岐網羅・境界値・エラーパターンを高速に検証</li>
+      </ul>
+
+      <p>たとえば「日付文字列をパースして翌営業日を返す関数」や「割引額を計算する純粋関数」など、入力 → 出力が決まる部分を集中的に守ります。</p>
+
+      <h3 id="integration-test">3.2 結合テスト (Integration Test)</h3>
+
+      <ul>
+        <li><strong>対象</strong>: 複数レイヤーをまたぐ動作 (例: service → ORM → 実 DB)</li>
+        <li><strong>外部依存</strong>: DB は<strong>本物の (テスト用) DB を使う</strong>。S3・SES・SQS など SaaS はモック</li>
+        <li><strong>速度</strong>: 1 本あたり 100 ms 〜 数秒</li>
+        <li><strong>数</strong>: Unit の数分の 1 程度</li>
+        <li><strong>狙い</strong>: SQL の発行ミス・トランザクション境界・ORM のスキーマずれなど、モックでは見つからないバグを潰す</li>
+      </ul>
+
+      <p>「Unit で全部モックすると嘘の挙動になりがち」な部分 (特に DB アクセス) は、ここで本物相手に検証します。</p>
+
+      <h3 id="e2e-test">3.3 E2E テスト (End-to-End Test)</h3>
+
+      <ul>
+        <li><strong>対象</strong>: HTTP リクエスト → ルーター → 認証 → コントローラ → サービス → DB → レスポンス、までの全経路</li>
+        <li><strong>外部依存</strong>: 外部 SaaS のみモック、それ以外は本番に近い構成</li>
+        <li><strong>速度</strong>: 1 本あたり数秒</li>
+        <li><strong>数</strong>: 主要フローのハッピーパス中心に少数精鋭 (10 〜 30 本程度)</li>
+        <li><strong>狙い</strong>: 認証込みのフロー、ミドルウェアの順序、エンドツーエンドの契約 (リクエスト/レスポンス形) を守る</li>
+      </ul>
+
+      <p>「ユーザーがログインしてリソースを作って一覧で取得できる」のような、<strong>ビジネス上の主要ユースケース</strong> をエンドツーエンドで保証します。エラー網羅は Unit/Integration に任せます。</p>
+
+      <hr>
+
+      <h2 id="happy-error-tdd">4. 正常系テスト・異常系テスト・TDD</h2>
+
+      <p>「あえて失敗するテストを書く」という言葉には実は <strong>2 つの意味</strong> があります。混同されがちなので分けて整理します。</p>
+
+      <h3 id="happy-vs-error">4.1 正常系テストと異常系テスト</h3>
+
+      <p>ひとつのエンドポイントや関数には、複数の振る舞いを検証する必要があります。</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>種類</th>
+              <th>検証内容</th>
+              <th>例 (POST /users)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>正常系</td><td>期待通り動く</td><td>正しい入力 → 201 + DB に行が増える</td></tr>
+            <tr><td>異常系</td><td>エラー時に正しくエラーになる</td><td>不正な email → 400 + DB は変わらない</td></tr>
+            <tr><td></td><td></td><td>認証なし → 401</td></tr>
+            <tr><td></td><td></td><td>重複 email → 409</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>異常系テストは「エラーになって<strong>ほしい</strong>」ケースを検証します。コードで書くと:</p>
+
+<pre><code class="language-ts">// 異常系の典型: バリデーションエラーを期待
+it("不正な email では 400 を返し、DB には書き込まない", async () =&gt; {
+  const res = await app.request("/users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "not-an-email" }),
+  });
+  expect(res.status).toBe(400);
+  expect(await db.select().from(users)).toHaveLength(0);
+});
+
+// 例外を期待する場合
+it("認証されていないユーザーには UnauthorizedError を投げる", () =&gt; {
+  expect(() =&gt; requireAuth(null)).toThrow("Unauthorized");
+});</code></pre>
+
+      <p><code>expect(...).toThrow()</code> や <code>expect(res.status).toBe(400)</code> を書く瞬間が、いわゆる <strong>「あえて失敗するテスト」の正体</strong> です。失敗 (エラー) が<strong>正解</strong>なテストを書くわけです。</p>
+
+      <p><strong>どこで書くか</strong>: 異常系は分岐パターンが多いため、Unit テストで網羅的に書くのが最も効率的です。E2E では「認証エラー」「主要バリデーションエラー」など代表的なものだけにとどめ、細かい異常系は Unit に任せます。</p>
+
+      <h3 id="tdd">4.2 TDD (Red-Green-Refactor)</h3>
+
+      <p>もうひとつ別の「失敗するテストを書く」文脈が <strong>TDD (テスト駆動開発)</strong> です。これはテストの種類ではなく<strong>開発手法</strong>であり、上記の異常系とは別の話です。</p>
+
+      <p>サイクルは 3 ステップ:</p>
+
+      <ol>
+        <li><strong>Red</strong>: 機能を実装する<strong>前</strong>に、まだ存在しない関数を呼ぶテストを書く → 当然失敗する (コンパイルエラーやアサート失敗)</li>
+        <li><strong>Green</strong>: そのテストが通る<strong>最小限</strong>の実装を書く</li>
+        <li><strong>Refactor</strong>: テストが通ったまま、コードを整える (重複削除、命名改善など)</li>
+      </ol>
+
+<pre class="diagram"><code>仕様を書く → テストを書く (Red) → 実装 (Green) → 整理 (Refactor) → 次の仕様...</code></pre>
+
+      <p><strong>なぜ先にテストを書くのか</strong>:</p>
+      <ul>
+        <li>実装より先に「この関数はどう呼ばれて何を返すべきか」を決められる (=仕様駆動)</li>
+        <li>後付けでテストを書こうとすると「テストしにくい設計」になりがちなのを防げる</li>
+        <li>「テストがある状態」を最初から保てる</li>
+      </ul>
+
+      <p><strong>強制ではない</strong>: TDD は強力な手法ですが、学習用プロジェクトで「常に TDD」にこだわる必要はありません。<strong>「実装前に最低限テストの形を決めておく」程度の意識でも、後付けで全部書くよりずっと整います</strong>。</p>
+
+      <h3 id="failing-test-meanings">4.3 まとめ: 「失敗するテスト」の 2 つの意味</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>文脈</th>
+              <th>意味</th>
+              <th>寿命</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>異常系テスト</td><td>エラーパスを検証するため、エラーが返ることを <code>expect</code> する</td><td>恒久的に残る</td></tr>
+            <tr><td>TDD の Red</td><td>実装より先にテストを書くと、まだ実装がないので失敗する</td><td>Green に持っていくまでの一時的状態</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>両方とも「失敗するテストを書く」と言えますが、目的も寿命も違います。</p>
+
+      <hr>
+
+      <h2 id="cross-framework">5. フレームワーク横断: 粒度の呼び方</h2>
+
+      <p>呼称はフレームワークごとに違いますが、<strong>「外部 I/O をどこまで本物にするか」</strong> が判断軸という点は共通です。</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>フレームワーク</th>
+              <th>Unit 相当</th>
+              <th>Integration / Feature 相当</th>
+              <th>E2E 相当</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Laravel (PHP)</td><td><code>Tests/Unit</code> (純粋ロジック)</td><td><code>Tests/Feature</code> (HTTP + 実 DB + マイグレーション)</td><td>公式区分なし。Feature でカバー or Dusk (ブラウザ)</td></tr>
+            <tr><td>Hono (TS)</td><td>vitest/jest で関数単位</td><td>vitest + <code>app.request()</code> + テスト用 DB</td><td>vitest or Playwright で実サーバー起動</td></tr>
+            <tr><td>Express (TS)</td><td>jest で関数単位</td><td>supertest + テスト用 DB</td><td>supertest + 実サーバー or Playwright</td></tr>
+            <tr><td>NestJS (TS)</td><td>jest で provider 単体</td><td>jest + <code>Test.createTestingModule()</code> + 実 DB</td><td>jest + supertest で <code>app.listen()</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Laravel は <strong>Unit と Feature の 2 分類</strong> が公式で、Feature が他フレームワークの Integration + E2E を兼ねるのが特徴です。Node 系 (Hono/Express/Nest) は <strong>Unit / Integration / E2E の 3 層</strong> に分けるのが慣習です。</p>
+
+      <hr>
+
+      <h2 id="testable-code-design">6. テストしやすいコードの設計原則</h2>
+
+      <p>テストの粒度を分けやすくする鍵は、<strong>プロダクションコード側の設計</strong> です。</p>
+
+      <ol>
+        <li><strong>依存性注入 (DI)</strong>: 外部依存を引数や DI コンテナで受け取り、テスト時に差し替え可能にする</li>
+        <li><strong>純粋関数を増やす</strong>: 副作用 (DB 書き込み・現在時刻・乱数) を関数の外に追い出し、入力 → 出力だけの関数を増やす</li>
+        <li><strong>I/O とビジネスロジックを分離</strong>: 「DB から取る」「メールを送る」を薄い層に閉じ込め、判定・計算・整形は別関数に切り出す</li>
+      </ol>
+
+      <p>逆に言えば、<strong>Unit テストが書きにくいコードはたいてい設計に問題がある</strong> ということです。テストを書こうとして「モックだらけで何を検証してるのかわからない」状態になったら、まず関数分割を疑います。</p>
+
+      <hr>
+
+      <h2 id="mock-stub">7. モック・スタブの考え方</h2>
+
+      <h3 id="mock-target">モックすべき依存</h3>
+
+      <ul>
+        <li><strong>遅い</strong>: ネットワーク経由の SaaS、外部 API</li>
+        <li><strong>不安定</strong>: 外部サービスのレート制限、ネットワークの揺らぎ</li>
+        <li><strong>課金される</strong>: SES のメール送信、SMS、外部 API のクォータ</li>
+        <li><strong>副作用が外に出る</strong>: 本番メール送信、本番 Slack 通知</li>
+      </ul>
+
+      <h3 id="dont-mock">モックすべきでない依存</h3>
+
+      <ul>
+        <li><strong>DB</strong>: アプリの振る舞いの中心であり、モックすると SQL のミスを発見できない。Integration では実 DB を使う</li>
+        <li><strong>自プロジェクト内の関数</strong>: 同じリポジトリ内のロジックをモックすると、テスト対象がほぼ空洞になる</li>
+      </ul>
+
+      <h3 id="over-mocking">「モックしすぎたテスト」の罠</h3>
+
+      <p><code>when(repo.find).thenReturn(user)</code> のようにモックの返り値を固定するだけのテストを大量に書くと、<strong>コードを書き写しただけで何も検証していない</strong> 状態になります。「リファクタしたら一斉に壊れるが、バグは見つけてくれない」テストの典型です。</p>
+
+      <p>判断目安: <strong>「この関数がどこに何を渡しているか」だけを assert していたらモックしすぎ</strong>。「最終的に何がどうなったか」を assert する方向に書き換えます。</p>
+
+      <hr>
+
+      <h2 id="scaling-tests">8. すべてのテストを必ず書く必要はあるか — プロジェクト規模と取捨選択</h2>
+
+      <h3 id="conclusion-not-required">8.1 結論: 必須ではない。何を守りたいかで決まる</h3>
+
+      <p>3 種類のテスト (Unit / Integration / E2E) は <strong>すべて書ければベスト</strong> ですが、書く時間とメンテ時間もかかります。どこまでやるかは <strong>「壊れたら困る度合い」 × 「壊れやすさ」</strong> で判断します。</p>
+
+      <ul>
+        <li>壊れたらユーザーに迷惑がかかる部分 → テストを手厚く</li>
+        <li>壊れても影響が小さい / すぐ気づける部分 → テストを省略 or 後回し</li>
+      </ul>
+
+      <h3 id="patterns-by-scale">8.2 規模ごとの典型パターン</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>規模</th>
+              <th>推奨構成</th>
+              <th>例</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>個人プロトタイプ / ハッカソン</td><td>E2E 数本のみ、または 0 本</td><td>動けばよい、捨てる前提のコード</td></tr>
+            <tr><td>学習プロジェクト</td><td><strong>Unit 中心 + 主要 Integration 数本</strong></td><td><strong>本プロジェクトはここ</strong></td></tr>
+            <tr><td>小規模サービス (本番運用)</td><td>Unit + Integration + 主要 E2E 1〜3 本</td><td>個人開発の SaaS</td></tr>
+            <tr><td>中〜大規模サービス</td><td>フルピラミッド + CI 必須</td><td>チーム開発・課金がからむ本番サービス</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>「規模が大きくなるほど、自分が把握しきれない部分が増える」── それを補うために自動テストの密度を上げます。逆に言えば、小さく短命なコードに分厚いテストを書くのは過剰投資です。</p>
+
+      <h3 id="what-to-write">8.3 「これは書く / これは書かなくていい」の判断</h3>
+
+      <p><strong>必ず書くべき</strong>:</p>
+      <ul>
+        <li>お金が動くロジック (決済、ポイント計算など)</li>
+        <li>認証・権限判定 (誰がどこを見られるか)</li>
+        <li>ユーザーデータが消える可能性のある操作 (削除、上書き)</li>
+        <li>複雑な分岐・計算 (割引、税金、日付計算など)</li>
+      </ul>
+
+      <p><strong>書かなくていい / 後回しでよい</strong>:</p>
+      <ul>
+        <li>設定ファイルの読み込み (壊れたら起動時にすぐ気づく)</li>
+        <li>フレームワーク標準機能の薄いラッパー (フレームワーク側がテスト済み)</li>
+        <li>ライブラリの再 export</li>
+        <li>管理画面の補助機能・内部用デバッグエンドポイント</li>
+      </ul>
+
+      <h3 id="project-recommendation">8.4 本プロジェクトへの推奨ライン</h3>
+
+      <p>本プロジェクトは <strong>学習用 + 中規模 + 本番投入予定あり</strong> という性質なので、以下を最初の目標とします。</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>対象</th>
+              <th>テスト</th>
+              <th>優先度</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>services/</code> のロジック関数 (QR 生成、メール送信、ストレージ)</td><td>Unit (正常系 + 異常系)</td><td><strong>最優先</strong></td></tr>
+            <tr><td><code>routes/</code> 主要エンドポイント (users / qrcodes)</td><td>Integration 各 1〜2 本</td><td>高</td></tr>
+            <tr><td>ログイン → QR 作成 → 一覧取得 のハッピーパス</td><td>E2E 1 本</td><td>中</td></tr>
+            <tr><td>設定ファイル (<code>config/</code>)・ヘルスチェック・SDK の薄いラッパー</td><td>書かない</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><strong>重要</strong>: いきなり全エンドポイント・全レイヤーをカバーしようとすると挫折します。<strong>まずこのラインを目標</strong>にし、運用しながら「壊れたら困った部分」だけ追加していくのが現実的です。</p>
+
+      <hr>
+
+      <h2 id="project-application">9. 本プロジェクトへの適用</h2>
+
+      <p>本プロジェクトのレイヤー構造 (<code>backend/src/</code>) は以下です。</p>
+
+<pre class="diagram"><code>routes/        Hono ルーター。URL とハンドラの紐付け、zod バリデーション
+  ↓
+controllers/   リクエスト解釈、レスポンス整形、HTTP ステータス決定
+  ↓
+services/      ビジネスロジック (QR 生成、メール送信、ストレージ操作)
+  ↓
+db/ (Drizzle)  スキーマ定義 + ORM クエリ
+  ↓
+MySQL          実 DB</code></pre>
+
+      <p>外部依存: <strong>S3 / SES / SQS</strong> (AWS SDK)、<strong>BetterAuth</strong> (Google OAuth)、<strong>Nodemailer</strong> (メール)。</p>
+
+      <h3 id="layer-mapping">9.1 レイヤー対応表</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>レイヤー / 対象</th>
+              <th>テスト種別</th>
+              <th>DB</th>
+              <th>AWS (S3/SES/SQS)</th>
+              <th>認証</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>services/</code> のロジック</td><td>Unit</td><td>モック</td><td>モック</td><td>不要</td></tr>
+            <tr><td><code>controllers/</code></td><td>Unit (or 軽い Integration)</td><td>services をモック</td><td>モック</td><td>不要</td></tr>
+            <tr><td><code>routes/</code> + DB アクセス</td><td>Integration</td><td><strong>テスト用 MySQL (実物)</strong></td><td>モック</td><td>モック</td></tr>
+            <tr><td>ログイン〜CRUD の主要フロー</td><td>E2E</td><td>テスト用 MySQL</td><td>モック</td><td><strong>本物の経路を通す</strong></td></tr>
+            <tr><td><code>lambda.ts</code> / <code>sqs-handler.ts</code> のハンドラ</td><td>Integration</td><td>モック or 実物</td><td>モック</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="unit-pseudo">9.2 疑似コード: Unit テスト (純粋ロジック)</h3>
+
+      <p><code>services/qrcode.service.ts</code> の中で純粋にデータ整形だけしている関数を切り出しているケースを想定します。</p>
+
+<pre><code class="language-ts">// services/qrcode.helpers.ts (純粋関数に切り出してある想定)
+export function buildQrFileName(userId: string, createdAt: Date): string {
+  return `qr/${userId}/${createdAt.toISOString()}.png`;
+}
+
+// __tests__/qrcode.helpers.test.ts
+import { describe, it, expect } from "vitest";
+import { buildQrFileName } from "../services/qrcode.helpers";
+
+describe("buildQrFileName", () =&gt; {
+  it("ユーザー ID と日時から S3 キーを生成する", () =&gt; {
+    const result = buildQrFileName("user-1", new Date("2026-01-01T00:00:00Z"));
+    expect(result).toBe("qr/user-1/2026-01-01T00:00:00.000Z.png");
+  });
+});</code></pre>
+
+      <p>DB も AWS も触らないので 1 ms 以下で終わります。境界値や異常系もここに集中させます。</p>
+
+      <h3 id="service-unit-pseudo">9.3 疑似コード: Service の Unit テスト (依存をモック)</h3>
+
+<pre><code class="language-ts">// __tests__/qrcode.service.test.ts
+import { describe, it, expect, vi } from "vitest";
+import { QrCodeService } from "../services/qrcode.service";
+
+describe("QrCodeService.generate", () =&gt; {
+  it("QR を生成して S3 に保存し、URL を返す", async () =&gt; {
+    const s3Mock = { upload: vi.fn().mockResolvedValue({ key: "qr/foo.png" }) };
+    const qrLibMock = { toBuffer: vi.fn().mockResolvedValue(Buffer.from("png")) };
+
+    const service = new QrCodeService(s3Mock as any, qrLibMock as any);
+    const url = await service.generate("user-1", "hello");
+
+    expect(qrLibMock.toBuffer).toHaveBeenCalledWith("hello");
+    expect(s3Mock.upload).toHaveBeenCalledOnce();
+    expect(url).toContain("qr/foo.png");
+  });
+});</code></pre>
+
+      <p>ポイントは <strong><code>QrCodeService</code> が S3 クライアントと QR ライブラリをコンストラクタで受け取る (DI) 設計</strong> になっていること。現状の <code>services/</code> がそうなっていない場合は、テストを書く過程でリファクタが必要になります (テストしやすさは設計の鏡)。</p>
+
+      <h3 id="integration-pseudo">9.4 疑似コード: Integration テスト (実 DB + Hono ルーター)</h3>
+
+      <p>Hono は <code>app.request()</code> でサーバーを起動せずにルーティングをテストできます。</p>
+
+<pre><code class="language-ts">// __tests__/users.route.integration.test.ts
+import { describe, it, expect, beforeEach } from "vitest";
+import { app } from "../app";
+import { db } from "../config/database";
+import { users } from "../db/schema";
+
+beforeEach(async () =&gt; {
+  await db.delete(users); // テスト用 MySQL を毎回クリーン
+});
+
+describe("POST /users", () =&gt; {
+  it("ユーザーを作成して DB に保存される", async () =&gt; {
+    const res = await app.request("/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Alice", email: "alice@example.com" }),
+    });
+
+    expect(res.status).toBe(201);
+    const stored = await db.select().from(users);
+    expect(stored).toHaveLength(1);
+    expect(stored[0].email).toBe("alice@example.com");
+  });
+});</code></pre>
+
+      <p>ここでは <strong>実 DB に書き込まれた結果</strong> を assert しているのが Integration の典型形です。SQL の typo・カラム名のずれ・トランザクション境界などはこの層でしか発見できません。</p>
+
+      <h3 id="e2e-pseudo">9.5 疑似コード: E2E テスト (認証込み主要フロー)</h3>
+
+<pre><code class="language-ts">// __tests__/e2e/qr-flow.test.ts
+import { describe, it, expect } from "vitest";
+import { app } from "../app";
+import { signInAsTestUser } from "./helpers/auth";
+
+describe("E2E: ログインして QR を作成して取得する", () =&gt; {
+  it("ハッピーパス全体が通る", async () =&gt; {
+    const cookie = await signInAsTestUser(); // BetterAuth の経路を通してセッション作成
+
+    const created = await app.request("/qrcodes", {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ payload: "https://example.com" }),
+    });
+    expect(created.status).toBe(201);
+    const { id } = await created.json();
+
+    const got = await app.request(`/qrcodes/${id}`, { headers: { Cookie: cookie } });
+    expect(got.status).toBe(200);
+    expect((await got.json()).payload).toBe("https://example.com");
+  });
+});</code></pre>
+
+      <p>E2E は <strong>本物の認証経路を通す</strong> ことと、<strong>エラー網羅をしすぎない</strong> (それは Unit/Integration の仕事) ことが要点です。S3 や SES は引き続きモック ── 実際に S3 にオブジェクトを置きにいくテストは CI で不安定化しやすいためです。</p>
+
+      <h3 id="external-deps-policy">9.6 外部依存の扱い方針 (本プロジェクト固有)</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>依存</th>
+              <th>Unit</th>
+              <th>Integration</th>
+              <th>E2E</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>MySQL (Drizzle)</td><td>モック</td><td><strong>実 (テスト用 DB)</strong></td><td><strong>実 (テスト用 DB)</strong></td></tr>
+            <tr><td>S3</td><td>モック</td><td>モック</td><td>モック</td></tr>
+            <tr><td>SES (メール送信)</td><td>モック</td><td>モック</td><td>モック</td></tr>
+            <tr><td>SQS</td><td>モック</td><td>モック</td><td>モック</td></tr>
+            <tr><td>BetterAuth (Google OAuth)</td><td>不要</td><td>Cookie/ヘッダ偽装</td><td>テストユーザーで本物の経路</td></tr>
+            <tr><td>Nodemailer</td><td>モック (送信せず内容を assert)</td><td>同左</td><td>同左</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>AWS SDK のモックは <code>aws-sdk-client-mock</code> を使うのが定番です。テスト用 MySQL は Docker Compose に既にある dev 用 MySQL とは<strong>別コンテナ</strong> (例: ポート違い・DB 名違い) で立てるとデータ汚染が起きません。</p>
+
+      <hr>
+
+      <h2 id="recommended-tools">10. 推奨ツール</h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>用途</th>
+              <th>推奨</th>
+              <th>理由</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>テストランナー</td><td><strong>Vitest</strong></td><td>TypeScript ネイティブ、esm 対応、watch が速い。Hono 公式ドキュメントでも採用例</td></tr>
+            <tr><td>HTTP テスト</td><td>Hono の <code>app.request()</code></td><td>実サーバーを起動せずルーターを通せる。supertest 不要</td></tr>
+            <tr><td>DB</td><td>テスト用 <strong>MySQL コンテナ</strong></td><td>本番と同じ MySQL 8.0 を使えば SQL の差異が出ない</td></tr>
+            <tr><td>AWS モック</td><td><code>aws-sdk-client-mock</code></td><td>S3/SES/SQS の v3 SDK 対応、宣言的に書ける</td></tr>
+            <tr><td>アサーション</td><td>Vitest 同梱の <code>expect</code></td><td>追加導入不要</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <hr>
+
+      <h2 id="where-to-start">11. 何から始めるか</h2>
+
+      <p>8.4 で示した推奨ラインを最終目標に、段階的に積み上げます。いきなり全レイヤーに手をつけず、以下の順序を推奨します。</p>
+
+      <ol>
+        <li><strong>Vitest を導入し、<code>services/</code> の純粋ロジックを 1 本 Unit テスト</strong> ── 道具と書き味に慣れる</li>
+        <li><strong>Service を依存注入できるようにリファクタしつつ、外部依存をモックした Unit テストを増やす</strong> ── 設計改善が伴う</li>
+        <li><strong>テスト用 MySQL を立て、<code>routes/</code> の Integration テストを 1 エンドポイント書く</strong> ── DB を絡めた assert の感覚を掴む</li>
+        <li><strong>主要フロー (ログイン → CRUD) の E2E テストを 1〜2 本書く</strong> ── 全体経路をハッピーパスで守る</li>
+        <li>CI への組み込み・カバレッジ計測などは別ドキュメントで扱う</li>
+      </ol>
+
+      <p>最初の 1 本を書くまでが一番大変で、書いた後は同じパターンの横展開になります。<strong>まずは Unit テスト 1 本</strong>を最小ゴールにして取り組むのが進めやすいです。</p>
+    </main>
+  </div>
+
+  <!-- Prism.js (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+</body>
+</html>

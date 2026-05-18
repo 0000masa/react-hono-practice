@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RDS Proxy IAM 認証トラブルシューティング</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" media="(prefers-color-scheme: light)">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" media="(prefers-color-scheme: dark)">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <h2>このページ</h2>
+      <ul>
+        <li><a href="#overview">概要</a></li>
+        <li><a href="#error">発生したエラー</a></li>
+        <li>
+          <a href="#investigation">調査の過程</a>
+          <ul>
+            <li><a href="#get-error" class="toc-h3">1. エラーメッセージの取得</a></li>
+            <li><a href="#using-password-no" class="toc-h3">2. using password: NO の意味</a></li>
+            <li><a href="#mysql2-flow" class="toc-h3">3. mysql2 の認証フローの確認</a></li>
+            <li><a href="#excluded-hypotheses" class="toc-h3">4. 除外した仮説</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#root-cause">根本原因</a>
+          <ul>
+            <li><a href="#before-fix" class="toc-h3">修正前(間違い)</a></li>
+            <li><a href="#after-fix" class="toc-h3">修正後(正しい)</a></li>
+            <li><a href="#arn-structure" class="toc-h3">ARN の構造の違い</a></li>
+          </ul>
+        </li>
+        <li><a href="#iam-auth-overview">IAM 認証の全体像</a></li>
+        <li><a href="#lessons">教訓</a></li>
+      </ul>
+    </aside>
+
+    <main class="content">
+      <nav class="breadcrumb" aria-label="breadcrumb">
+        <a href="../../README.md">プロジェクト</a>
+        <span class="breadcrumb-sep">/</span>
+        <span>docs</span>
+        <span class="breadcrumb-sep">/</span>
+        <span>rds-proxy-iam-auth-guide</span>
+      </nav>
+
+      <h1>RDS Proxy IAM 認証トラブルシューティング</h1>
+
+      <h2 id="overview">概要</h2>
+
+      <p>Lambda から RDS Proxy に IAM 認証で接続する際に発生した <code>Access denied (using password: NO)</code> エラーの原因と修正内容をまとめる。</p>
+
+      <h2 id="error">発生したエラー</h2>
+
+<pre><code class="language-text">Access denied for user 'admin'@'192.168.x.x' (using password: NO)</code></pre>
+
+      <p>Lambda でマイグレーション(<code>drizzle-orm</code> の <code>migrate()</code>)を実行すると、上記エラーで失敗していた。</p>
+
+      <h2 id="investigation">調査の過程</h2>
+
+      <h3 id="get-error">1. エラーメッセージの取得</h3>
+
+      <p>drizzle-orm は元の MySQL エラーを <code>cause</code> プロパティに格納するが、デフォルトでは表示されない。
+      <code>try-catch</code> で <code>error.cause</code> をログ出力することで、実際の MySQL エラーを確認できた。</p>
+
+      <h3 id="using-password-no">2. <code>using password: NO</code> の意味</h3>
+
+      <p>通常の MySQL では「パスワードが送信されていない」ことを意味する。
+      しかし RDS Proxy の IAM 認証では、「<strong>IAM 認証に失敗した</strong>」場合にもこのメッセージが返される。</p>
+
+      <h3 id="mysql2-flow">3. mysql2 の認証フローの確認</h3>
+
+      <p><code>mysql2</code> の接続オプションに <code>debug: true</code> を設定し、MySQL プロトコルレベルの認証ハンドシェイクを確認した。</p>
+
+      <p>実際の認証フロー:</p>
+
+<pre class="diagram"><code>1. RDS Proxy → Lambda: サーバーハンドシェイク(auth method: mysql_native_password)
+2. Lambda → RDS Proxy: TLS アップグレード要求
+3.         (TLS ハンドシェイク)
+4. Lambda → RDS Proxy: mysql_native_password のハッシュを送信
+5. RDS Proxy → Lambda: auth switch 要求(mysql_clear_password に切り替え)
+6. Lambda → RDS Proxy: IAM トークンを平文で送信(1518バイト)
+7. RDS Proxy → Lambda: Access denied (using password: NO)</code></pre>
+
+      <p>ステップ 6 で IAM トークンは正しく送信されていた。
+      つまり <strong>mysql2 の問題ではなく、IAM 認証の検証段階で失敗</strong> していた。</p>
+
+      <h3 id="excluded-hypotheses">4. 除外した仮説</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>仮説</th>
+              <th>結果</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>TLS 証明書の問題</td>
+              <td>RDS Proxy は Amazon Trust Services の公開 CA を使用。Node.js のデフォルト CA バンドルに含まれるため問題なし</td>
+            </tr>
+            <tr>
+              <td>mysql2 の <code>mysql_clear_password</code> プラグイン未対応</td>
+              <td>mysql2 v3.20.0 は対応済み。RDS Proxy からの auth switch 要求に正しく応答していた</td>
+            </tr>
+            <tr>
+              <td>IAM トークンの生成失敗</td>
+              <td><code>@aws-sdk/rds-signer</code> の <code>getAuthToken()</code> は正常にトークンを生成していた(1518文字)</td>
+            </tr>
+            <tr>
+              <td>esbuild バンドルの問題</td>
+              <td>バンドル後のコードを確認し、<code>db</code> 変数のライブバインディングは正しく動作していた</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="root-cause">根本原因</h2>
+
+      <p><strong>IAM ポリシーの Resource ARN が間違っていた。</strong></p>
+
+      <p><code>rds-db:connect</code> アクションの Resource ARN には、RDS Proxy の<strong>リソース ID</strong>(<code>prx-xxx</code> 形式)が必要だが、Proxy の<strong>名前</strong>を使用していた。</p>
+
+      <h3 id="before-fix">修正前(間違い)</h3>
+
+<pre><code class="language-hcl"># aws_db_proxy.main.id は Proxy の「名前」(例: "practice-stg-rds-proxy")を返す
+Resource = "arn:aws:rds-db:ap-northeast-1:${account_id}:dbuser:${aws_db_proxy.main.id}/${var.db_username}"
+# 結果: arn:aws:rds-db:ap-northeast-1:123456789:dbuser:practice-stg-rds-proxy/admin</code></pre>
+
+      <h3 id="after-fix">修正後(正しい)</h3>
+
+<pre><code class="language-hcl"># Proxy の ARN(arn:aws:rds:{region}:{account}:db-proxy:prx-xxx)からリソース ID を抽出
+Resource = "arn:aws:rds-db:ap-northeast-1:${account_id}:dbuser:${element(split(":", aws_db_proxy.main.arn), 6)}/${var.db_username}"
+# 結果: arn:aws:rds-db:ap-northeast-1:123456789:dbuser:prx-cd066iea4uze/admin</code></pre>
+
+      <h3 id="arn-structure">ARN の構造の違い</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>種類</th>
+              <th>ARN 形式</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>RDS Proxy 自体の ARN</td>
+              <td><code>arn:aws:rds:{region}:{account}:db-proxy:prx-xxx</code></td>
+            </tr>
+            <tr>
+              <td><code>rds-db:connect</code> の Resource ARN</td>
+              <td><code>arn:aws:rds-db:{region}:{account}:dbuser:prx-xxx/{username}</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><code>rds-db:connect</code> の Resource ARN は <code>rds-db</code> サービス名前空間を使い、<code>dbuser:</code> の後にリソース ID(<code>prx-xxx</code>)が来る。
+      Terraform の <code>aws_db_proxy</code> リソースでは:</p>
+
+      <ul>
+        <li><code>id</code> → Proxy の<strong>名前</strong>(例: <code>practice-stg-rds-proxy</code>)</li>
+        <li><code>arn</code> → Proxy の<strong>完全な ARN</strong>(例: <code>arn:aws:rds:ap-northeast-1:123456789:db-proxy:prx-xxx</code>)</li>
+      </ul>
+
+      <p><code>arn</code> の 7 番目の <code>:</code> 区切り要素がリソース ID になる。</p>
+
+      <h2 id="iam-auth-overview">IAM 認証の全体像</h2>
+
+<pre class="diagram"><code>Lambda
+  │
+  │ 1. IAM トークン生成(@aws-sdk/rds-signer)
+  │    - Lambda の実行ロールの認証情報で署名
+  │    - hostname, port, username を含むプリサインド URL
+  │
+  │ 2. MySQL 接続(mysql2)
+  │    - TLS で RDS Proxy に接続
+  │    - IAM トークンをパスワードとして送信(mysql_clear_password)
+  │
+  ▼
+RDS Proxy
+  │
+  │ 3. IAM トークン検証
+  │    - トークンの署名を検証
+  │    - Lambda の IAM ロールに rds-db:connect 権限があるか確認 ← ここで失敗していた
+  │    - Resource ARN が一致するか確認
+  │
+  │ 4. DB 接続(Secrets Manager 認証)
+  │    - Secrets Manager から DB パスワードを取得
+  │    - RDS に接続
+  │
+  ▼
+RDS (MySQL 8.4)</code></pre>
+
+      <h2 id="lessons">教訓</h2>
+
+      <ol>
+        <li>RDS Proxy の <code>using password: NO</code> は IAM 認証失敗の汎用エラーであり、文字通り「パスワードが送信されていない」とは限らない</li>
+        <li>Terraform の <code>aws_db_proxy.main.id</code> は名前を返す。リソース ID が必要な場合は <code>arn</code> から抽出する</li>
+        <li>問題の切り分けには <code>mysql2</code> の <code>debug: true</code> オプションが有効。MySQL プロトコルレベルのパケット交換を確認できる</li>
+      </ol>
+    </main>
+  </div>
+
+  <!-- Prism.js (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+</body>
+</html>

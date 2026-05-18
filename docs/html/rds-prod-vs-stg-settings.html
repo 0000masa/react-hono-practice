@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RDS 本番 / ステージング環境別設定ガイド</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" media="(prefers-color-scheme: light)">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" media="(prefers-color-scheme: dark)">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <h2>このページ</h2>
+      <ul>
+        <li><a href="#tldr">TL;DR — 推奨設定一覧</a></li>
+        <li>
+          <a href="#env-policy">環境別の設定方針(基本思想)</a>
+          <ul>
+            <li><a href="#stg-goal" class="toc-h3">ステージング環境のゴール</a></li>
+            <li><a href="#prod-goal" class="toc-h3">本番環境のゴール</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#cloudwatch-cost">CloudWatch 関連3機能の料金</a>
+          <ul>
+            <li><a href="#perf-insights" class="toc-h3">Performance Insights</a></li>
+            <li><a href="#enhanced-monitoring" class="toc-h3">Enhanced Monitoring</a></li>
+            <li><a href="#logs-exports" class="toc-h3">enabled_cloudwatch_logs_exports</a></li>
+            <li><a href="#total-cost" class="toc-h3">合計コスト試算</a></li>
+            <li><a href="#stg-disabled" class="toc-h3">ステージングでは無効が妥当</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#detail">各設定項目の詳細</a>
+          <ul>
+            <li><a href="#multi-az" class="toc-h3">multi_az</a></li>
+            <li><a href="#backup-retention" class="toc-h3">backup_retention_period</a></li>
+            <li><a href="#deletion-protection" class="toc-h3">deletion_protection</a></li>
+            <li><a href="#skip-final-snapshot" class="toc-h3">skip_final_snapshot</a></li>
+            <li><a href="#instance-class" class="toc-h3">instance_class</a></li>
+            <li><a href="#storage" class="toc-h3">allocated_storage と storage_type</a></li>
+            <li><a href="#perf-monitoring" class="toc-h3">Performance Insights と Enhanced Monitoring</a></li>
+            <li><a href="#apply-immediately" class="toc-h3">apply_immediately</a></li>
+            <li><a href="#logs-exports-detail" class="toc-h3">enabled_cloudwatch_logs_exports</a></li>
+            <li><a href="#encryption" class="toc-h3">storage_encrypted</a></li>
+            <li><a href="#other-prod" class="toc-h3">その他の本番推奨設定</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#tf-recommended">推奨 Terraform 構成</a>
+          <ul>
+            <li><a href="#env-variables" class="toc-h3">環境別変数</a></li>
+            <li><a href="#stg-values" class="toc-h3">ステージング環境の設定値</a></li>
+            <li><a href="#prod-values" class="toc-h3">本番環境を追加する場合</a></li>
+          </ul>
+        </li>
+        <li><a href="#checklist">本番昇格時のチェックリスト</a></li>
+        <li><a href="#cost-estimate">コスト試算</a></li>
+        <li><a href="#waf">AWS Well-Architected での位置づけ</a></li>
+        <li><a href="#summary">まとめ</a></li>
+      </ul>
+    </aside>
+
+    <main class="content">
+      <nav class="breadcrumb" aria-label="breadcrumb">
+        <a href="../../README.md">プロジェクト</a>
+        <span class="breadcrumb-sep">/</span>
+        <span>docs</span>
+        <span class="breadcrumb-sep">/</span>
+        <span>rds-prod-vs-stg-settings</span>
+      </nav>
+
+      <h1>RDS 本番 / ステージング環境別設定ガイド</h1>
+
+      <p>AWS 公式ドキュメント・AWS Well-Architected Framework・AWS Control Tower / Security Hub のベストプラクティスに基づき、本番環境(production)とステージング環境(staging)で <strong>RDS の設定を環境別にどう分けるべきか</strong> をまとめる。</p>
+
+      <blockquote>
+        <p>出典:</p>
+        <ul>
+          <li><a href="https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/disaster-recovery-resiliency.html">Resilience in Amazon RDS</a></li>
+          <li><a href="https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_WorkingWithAutomatedBackups.html">Introduction to backups - Amazon RDS</a></li>
+          <li><a href="https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_CreateDBInstance.Settings.html">Settings for DB instances - Amazon RDS</a></li>
+          <li><a href="https://docs.aws.amazon.com/controltower/latest/controlreference/rds-rules.html">Amazon RDS controls - AWS Control Tower</a></li>
+          <li><a href="https://docs.aws.amazon.com/securityhub/latest/userguide/rds-controls.html">Security Hub CSPM controls for RDS</a></li>
+          <li><a href="https://aws.amazon.com/blogs/database/long-term-backup-options-for-amazon-rds-and-amazon-aurora/">Long-term backup options for RDS and Aurora</a></li>
+        </ul>
+      </blockquote>
+
+      <hr>
+
+      <blockquote>
+        <p><strong>TL;DR</strong> = "Too Long; Didn't Read"(長すぎて読まなかった)の略。長文の冒頭に置く「要約」「結論だけ知りたい人向けのまとめ」を意味するインターネット由来の慣用表現。</p>
+      </blockquote>
+
+      <h2 id="tldr">TL;DR — 推奨設定一覧</h2>
+
+      <p>「Terraform デフォルト」列は <code>aws_db_instance</code> リソースで該当属性を <strong>指定しなかった場合に適用される値</strong> を示す。</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>設定項目</th>
+              <th>概要(何を設定するか)</th>
+              <th>Terraform デフォルト</th>
+              <th>ステージング</th>
+              <th>本番</th>
+              <th>備考</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>multi_az</code></td><td>スタンバイDBを別AZに配置するか。<code>true</code>で同期レプリケーション + 自動フェイルオーバーが有効化される</td><td><code>false</code></td><td><code>false</code></td><td><strong><code>true</code></strong></td><td>本番は単一AZ障害でのDB停止を防ぐため必須</td></tr>
+            <tr><td><code>backup_retention_period</code></td><td>自動バックアップの保持日数(0〜35)。この日数分のPITR(任意時点復元)が可能</td><td><code>0</code>(自動バックアップ無効)※AWS API側で <code>1</code> に補正される場合あり</td><td><code>1〜3</code> 日</td><td><strong><code>14〜35</code> 日</strong></td><td>ステージングは短く、本番は最低14日</td></tr>
+            <tr><td><code>deletion_protection</code></td><td>DBインスタンスの削除保護。<code>true</code>にすると、この設定をfalseに戻すまでDBを削除できなくなる</td><td><code>false</code></td><td><code>false</code></td><td><strong><code>true</code></strong></td><td>本番は誤削除防止必須</td></tr>
+            <tr><td><code>skip_final_snapshot</code></td><td>DB削除時に最終スナップショットを取得するかをスキップするか。<code>false</code>にすると削除直前のデータがスナップショットとして残る</td><td><code>false</code>(= 最終スナップショット取得)</td><td><code>true</code></td><td><strong><code>false</code></strong></td><td><code>false</code>時は <code>final_snapshot_identifier</code> 指定必須</td></tr>
+            <tr><td><code>instance_class</code></td><td>DBインスタンスの計算リソース(CPU/メモリ)スペック。<code>db.t4g.micro</code> から <code>db.r6g.16xlarge</code> まで多数の選択肢あり</td><td><strong>必須</strong>(デフォルトなし)</td><td><code>db.t4g.micro</code></td><td><code>db.t4g.medium</code> 以上</td><td>本番は実負荷に応じて選定</td></tr>
+            <tr><td><code>allocated_storage</code></td><td><strong>初期割り当てストレージ容量(GB)</strong>。この値分が常時課金される(実使用量ではなく確保量に対して課金)</td><td><strong>必須</strong>(デフォルトなし)</td><td><code>20</code> GB</td><td><code>100</code> GB 以上</td><td>本番は将来の増加を見込む</td></tr>
+            <tr><td><code>max_allocated_storage</code></td><td><strong>Storage Autoscalingの拡張上限(GB)</strong>。<code>allocated_storage</code>が枯渇しそうになると自動拡張される。設定値自体には課金されず、実際に拡張された分のみ課金</td><td><code>0</code>(自動拡張無効)</td><td><code>0</code>(無効)</td><td><code>500</code> 以上</td><td>大きめに設定しても料金は増えない(保険として推奨)</td></tr>
+            <tr><td><code>storage_type</code></td><td>ストレージ種別。<code>gp2</code>/<code>gp3</code>(汎用SSD)、<code>io1</code>/<code>io2</code>(プロビジョンドIOPS)、<code>magnetic</code>(旧世代HDD)</td><td><code>gp2</code>(<code>io1</code>/<code>io2</code> 指定時を除く)</td><td><code>gp3</code></td><td><code>gp3</code> または <code>io2</code></td><td><code>gp3</code> の方がコスト効率良</td></tr>
+            <tr><td><code>performance_insights_enabled</code></td><td>Performance Insights(DB性能可視化ツール)の有効化。スロークエリ・ロック待ち・トップSQLが可視化される</td><td><code>false</code></td><td><code>false</code>(任意)</td><td><strong><code>true</code></strong></td><td>本番は性能トラブルシュート用に必須</td></tr>
+            <tr><td><code>monitoring_interval</code></td><td>Enhanced Monitoringのメトリクス取得間隔(秒)。<code>0</code>/<code>1</code>/<code>5</code>/<code>10</code>/<code>15</code>/<code>30</code>/<code>60</code>から選択。OS層のCPU・メモリ・プロセス情報をCloudWatchに送信</td><td><code>0</code>(Enhanced Monitoring 無効)</td><td><code>0</code>(無効)</td><td><code>60</code> 秒</td><td>本番で有効化</td></tr>
+            <tr><td><code>auto_minor_version_upgrade</code></td><td>DBエンジンのマイナーバージョン自動アップグレード。セキュリティパッチが自動適用される</td><td><code>true</code></td><td><code>true</code></td><td><code>true</code></td><td>両方で有効(セキュリティパッチ)</td></tr>
+            <tr><td><code>apply_immediately</code></td><td>設定変更を即座に適用するか。<code>false</code>にするとメンテナンスウィンドウまで反映が遅延される</td><td><code>false</code></td><td><code>true</code></td><td><strong><code>false</code></strong></td><td>本番でtrueは予期しないダウンタイムの原因になる</td></tr>
+            <tr><td><code>enabled_cloudwatch_logs_exports</code></td><td>CloudWatch Logsへエクスポートするログ種別の配列。<code>error</code>/<code>slowquery</code>/<code>general</code>/<code>audit</code>から選択</td><td><code>null</code>(無効)</td><td><code>["error"]</code></td><td><code>["error", "slowquery", "general"]</code></td><td>本番は監査・分析のため広めに</td></tr>
+            <tr><td><code>storage_encrypted</code></td><td>保管時暗号化(AES-256)の有効化。データ・自動バックアップ・スナップショット・ログ全てが暗号化される</td><td><code>false</code></td><td><code>true</code></td><td><code>true</code></td><td>両方で必須(後から変更不可)</td></tr>
+            <tr><td><code>publicly_accessible</code></td><td>DBインスタンスにパブリックIPを割り当てインターネットから直接接続可能にするか</td><td><code>false</code></td><td><code>false</code></td><td><code>false</code></td><td>両方で必須(VPC内のみアクセス)</td></tr>
+            <tr><td><code>copy_tags_to_snapshot</code></td><td>DBインスタンスのタグをスナップショットに自動コピーするか。コスト管理・棚卸しに必要</td><td><code>false</code></td><td><code>true</code></td><td><code>true</code></td><td>スナップショット管理のため有効化</td></tr>
+            <tr><td><code>iam_database_authentication_enabled</code></td><td>IAM認証によるDB接続を有効化。DBユーザーパスワード不要でIAMトークンで接続可能</td><td><code>false</code></td><td><code>true</code></td><td><code>true</code></td><td>RDS Proxy + IAM認証で対応済</td></tr>
+            <tr><td><code>backup_window</code></td><td>自動バックアップを実行する時間帯(UTC、30分単位)。<code>hh:mm-hh:mm</code>形式</td><td>AWSが自動選択</td><td><code>"17:00-17:30"</code> UTC</td><td>業務時間外(例: JST 02:00-02:30 = UTC 17:00-17:30)</td><td>I/O負荷が増えるため業務時間外に設定</td></tr>
+            <tr><td><code>maintenance_window</code></td><td>OS/エンジンパッチを適用する時間帯(UTC、30分単位)。<code>ddd:hh:mm-ddd:hh:mm</code>形式</td><td>AWSが自動選択</td><td><code>"sun:15:00-sun:15:30"</code></td><td>業務時間外</td><td>再起動を伴うため業務時間外に設定</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <hr>
+
+      <h2 id="env-policy">1. 環境別の設定方針(基本思想)</h2>
+
+      <h3 id="stg-goal">ステージング環境のゴール</h3>
+      <ul>
+        <li><strong>コスト最小化</strong>: 本番の 1/3〜1/5 のコスト目標</li>
+        <li><strong>本番に近い構成</strong>: エンジン・パラメータグループは本番と同一(互換性検証のため)</li>
+        <li><strong>データの可塑性</strong>: 壊れても復旧時間より「作り直し」を優先</li>
+      </ul>
+
+      <h3 id="prod-goal">本番環境のゴール</h3>
+      <ul>
+        <li><strong>可用性 99.95% 以上</strong>: 単一AZ障害で停止しない</li>
+        <li><strong>データ保護</strong>: 誤削除・誤更新からの復旧手段を担保</li>
+        <li><strong>観測性</strong>: 性能劣化を即座に検知できる</li>
+        <li><strong>コンプライアンス</strong>: 暗号化・監査ログ要件を満たす</li>
+      </ul>
+
+      <hr>
+
+      <h2 id="cloudwatch-cost">1.5. CloudWatch 関連3機能の料金(重要)</h2>
+
+      <p><code>enabled_cloudwatch_logs_exports</code>、<code>performance_insights_enabled</code>、<code>monitoring_interval</code> はいずれも <strong>ログ・メトリクスを CloudWatch に送る機能</strong> であり、<strong>有効化すると課金が発生する</strong>(無料枠を超えた分)。以下は AWS 公式ドキュメントベースの実用的な目安。</p>
+
+      <h3 id="perf-insights">① Performance Insights — 通常運用は <strong>完全無料</strong></h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>プラン</th><th>内容</th><th>料金</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>無料枠(デフォルト)</strong></td>
+              <td>直近 <strong>7日間</strong> の性能データ履歴 + <strong>100万 API リクエスト/月</strong></td>
+              <td><strong>$0</strong></td>
+            </tr>
+            <tr>
+              <td>有料(拡張保持)</td>
+              <td>1〜24ヶ月の保持期間</td>
+              <td>vCPU × 月数で課金</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout important">
+        <div class="callout-title">ポイント</div>
+        <ul>
+          <li>デフォルトの7日保持なら <strong>完全に無料</strong>(<a href="https://aws.amazon.com/rds/performance-insights/pricing/">Performance Insights Pricing 公式</a>)</li>
+          <li>7日でも本番のトラブルシューティングには十分</li>
+          <li>2026-06-30 以降、Performance Insights ダッシュボードと柔軟保持期間は廃止。CloudWatch Database Insights の Advanced mode に移行予定</li>
+          <li>このプロジェクトでは <strong>デフォルト(7日無料)で本番有効化推奨</strong></li>
+        </ul>
+      </div>
+
+      <h3 id="enhanced-monitoring">② Enhanced Monitoring — 月 <strong>$1〜5/インスタンス</strong> 程度</h3>
+
+      <p>CloudWatch Logs に OS メトリクスを送る方式。料金は CloudWatch Logs の従量課金に準ずる。</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>取得間隔</th><th>1日のログ量(目安)</th><th>月コスト目安(Tokyo, 1インスタンス)</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>60</code> 秒</td><td>約 1〜2 MB</td><td><strong>約 $0〜2/月</strong>(無料枠内に収まることが多い)</td></tr>
+            <tr><td><code>15</code> 秒</td><td>約 5〜8 MB</td><td>約 $2〜5/月</td></tr>
+            <tr><td><code>1</code> 秒</td><td>約 60〜100 MB</td><td>約 $20〜50/月</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><strong>料金の構造</strong>(<a href="https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_Monitoring.OS.html">Enhanced Monitoring 公式</a>):</p>
+      <ul>
+        <li>データはCloudWatch Logsに保存され、<strong>CloudWatch Logsの料金(取り込み + 保存)が適用</strong></li>
+        <li>CloudWatch Logs 無料枠: <strong>5 GB/月の取り込み</strong></li>
+        <li>有料: <strong>約 $0.76/GB 取り込み + $0.033/GB/月 保存</strong>(Tokyo)</li>
+        <li>インターバルが短いほど比例してログ量増加</li>
+        <li>デフォルト保持30日(CloudWatch Logsで変更可能)</li>
+        <li>加えて、Enhanced Monitoring 用の <strong>IAM ロール</strong> が必要(料金はかからない)</li>
+      </ul>
+
+      <p><strong>推奨</strong>: 本番で <code>60</code> 秒間隔なら無料枠内に収まる可能性が高く、コスパが良い。</p>
+
+      <h3 id="logs-exports">③ <code>enabled_cloudwatch_logs_exports</code>(DBログのCloudWatch転送)— 月 <strong>$0〜数十ドル</strong></h3>
+
+      <p>DBエンジンのログを CloudWatch Logs に転送する機能。送るログの種類と量で料金が決まる。</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>ログ種別</th><th>月のログ量目安</th><th>月コスト目安(Tokyo)</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>error</code></td><td>数MB〜数十MB</td><td><strong>ほぼ無料</strong>(無料枠内)</td></tr>
+            <tr><td><code>slowquery</code></td><td>数十MB〜数GB(クエリ次第)</td><td>$0〜数ドル</td></tr>
+            <tr><td><code>general</code></td><td>数GB〜数十GB(<strong>全クエリ記録</strong>)</td><td><strong>$5〜数十ドル</strong></td></tr>
+            <tr><td><code>audit</code></td><td>数GB(ログプラグイン要)</td><td>$5〜数十ドル</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><strong>料金</strong>(CloudWatch Logs 共通):</p>
+      <ul>
+        <li>無料枠: 月 <strong>5 GB の取り込み</strong></li>
+        <li>取り込み課金: <strong>約 $0.76/GB</strong>(Tokyo、Vended Logs は安い場合あり)</li>
+        <li>保存課金: <strong>約 $0.033/GB/月</strong></li>
+      </ul>
+
+      <div class="callout warning">
+        <div class="callout-title">注意</div>
+        <ul>
+          <li><code>general</code> は全クエリを記録するため <strong>本番で常時ONにすると激しく課金される</strong>。短期調査用に推奨</li>
+          <li><code>audit</code> も同様に容量大。コンプライアンス要件がある場合のみ有効化</li>
+          <li><code>error</code> と <code>slowquery</code> は容量が小さく、コストはほぼ問題にならない</li>
+        </ul>
+      </div>
+
+      <h3 id="total-cost">CloudWatch関連機能の合計コスト試算(本番、<code>db.t4g.medium</code> × Multi-AZ)</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>機能</th><th>設定</th><th>月コスト</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Performance Insights</td><td>有効(7日無料枠)</td><td><strong>$0</strong></td></tr>
+            <tr><td>Enhanced Monitoring</td><td><code>monitoring_interval = 60</code></td><td><strong>約 $0〜2</strong></td></tr>
+            <tr><td><code>enabled_cloudwatch_logs_exports</code></td><td><code>["error", "slowquery"]</code></td><td><strong>約 $0〜3</strong></td></tr>
+            <tr><td><strong>合計</strong></td><td></td><td><strong>約 $0〜5/月</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><strong>結論</strong>: 本番で3機能とも有効化しても、適切な設定(60秒間隔・errorとslowqueryのみ)なら <strong>月 $5 以下</strong> に収まる。観測性のメリットを考えれば極めてコスパが良い。</p>
+
+      <h3 id="stg-disabled">ステージングでは無効が妥当</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>機能</th><th>ステージング推奨</th><th>理由</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Performance Insights</td><td><code>false</code></td><td>検証環境で性能トラブル分析の必要性は低い</td></tr>
+            <tr><td>Enhanced Monitoring</td><td><code>0</code>(無効)</td><td>CloudWatch標準メトリクスで十分</td></tr>
+            <tr><td><code>enabled_cloudwatch_logs_exports</code></td><td><code>["error"]</code> のみ</td><td>エラーログだけで運用に支障なし</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <hr>
+
+      <h2 id="detail">2. 各設定項目の詳細</h2>
+
+      <h3 id="multi-az">2-1. <code>multi_az</code>(Multi-AZ 配置)</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>環境</th><th>推奨値</th><th>理由</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>ステージング</td><td><code>false</code></td><td>コスト2倍に見合う可用性要件がない</td></tr>
+            <tr><td>本番</td><td><strong><code>true</code></strong></td><td>AZ障害時に1〜2分で自動フェイルオーバー、データ損失なし(同期レプリケーション)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><strong>Multi-AZ の動作</strong>(<a href="https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.MultiAZ.html">公式ドキュメント</a>より):</p>
+      <ul>
+        <li>スタンバイDBが別AZに同期レプリケーションで配置される</li>
+        <li>スタンバイは読み取りには使えない(純粋なフェイルオーバー用)</li>
+        <li>自動バックアップはスタンバイから取得されるため、プライマリへの I/O 影響が最小化される</li>
+        <li>フェイルオーバーは自動(AZ障害・OS パッチ・インスタンス障害時)</li>
+      </ul>
+
+      <p><strong>コスト影響</strong>: インスタンス料金が約 <strong>2倍</strong>、ストレージ料金も2倍。</p>
+
+      <h3 id="backup-retention">2-2. <code>backup_retention_period</code>(自動バックアップ保持日数)</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>環境</th><th>推奨値</th><th>理由</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>ステージング</td><td><code>1〜3</code> 日</td><td>直近の検証データを戻せれば十分。コスト削減</td></tr>
+            <tr><td>本番(一般Web)</td><td><strong><code>14</code> 日</strong></td><td>1〜2週間前の論理破壊・運用ミスに対応可能</td></tr>
+            <tr><td>本番(厳格)</td><td><strong><code>30〜35</code> 日</strong>(最大)</td><td>監査・コンプライアンス要件がある場合</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><strong>仕様</strong>(<a href="https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_WorkingWithAutomatedBackups.html">公式ドキュメント</a>より):</p>
+      <ul>
+        <li>設定可能範囲: <strong>0〜35 日</strong></li>
+        <li><code>0</code> を指定すると <strong>自動バックアップ無効 = PITR不可</strong></li>
+        <li>設定値そのまま PITR(Point-In-Time Recovery)の遡れる範囲になる</li>
+        <li>スナップショットは S3 に保存され、最初は完全、以降は増分</li>
+        <li>DB割当ストレージサイズ以下のバックアップは無料、超過分は $0.095/GB/月(東京)</li>
+      </ul>
+
+      <p><strong>35日を超える長期保持が必要なら</strong>:</p>
+      <ul>
+        <li>AWS Backup の Vault Lock で年単位保持</li>
+        <li>手動スナップショット(削除されない限り保持)</li>
+        <li>スナップショットを S3 にエクスポート(Parquet形式、Athena分析可能)</li>
+      </ul>
+
+      <h3 id="deletion-protection">2-3. <code>deletion_protection</code>(削除保護)</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>環境</th><th>推奨値</th><th>理由</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>ステージング</td><td><code>false</code></td><td>Terraform で頻繁に作り直す可能性がある</td></tr>
+            <tr><td>本番</td><td><strong><code>true</code></strong></td><td>コンソールやCLIからの誤削除を防ぐ</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>AWS Control Tower / Security Hub いずれも本番DBには <strong>必須コントロール</strong> として推奨。<code>true</code> の場合、削除前にこの設定を <code>false</code> に変更する必要があり、誤操作の防壁となる。</p>
+
+      <h3 id="skip-final-snapshot">2-4. <code>skip_final_snapshot</code>(削除時の最終スナップショット)</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>環境</th><th>推奨値</th><th>理由</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>ステージング</td><td><code>true</code></td><td>スナップショット不要、削除を高速化</td></tr>
+            <tr><td>本番</td><td><strong><code>false</code></strong></td><td>削除直前のデータを保全、復旧の最後の砦</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><code>false</code> の場合は <code>final_snapshot_identifier</code> の指定も必要。</p>
+
+      <h3 id="instance-class">2-5. <code>instance_class</code>(インスタンスクラス)</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>環境</th><th>推奨値</th><th>理由</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>ステージング</td><td><code>db.t4g.micro</code> / <code>db.t4g.small</code></td><td>バーストCPUで十分、最安クラス</td></tr>
+            <tr><td>本番</td><td><code>db.t4g.medium</code> 以上 / <code>db.m6g.large</code> 以上</td><td>本番ワークロードでは継続的なCPU性能が必要</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><strong>選定指針</strong>:</p>
+      <ul>
+        <li>バースト型(<code>t</code> 系)は CPU クレジットが枯渇すると性能が劇的に低下するため、<strong>本番の常時稼働には m 系・r 系を推奨</strong></li>
+        <li>ARM ベース(<code>g</code> サフィックス、Graviton)は x86 比で 20〜35% コスト効率が良い</li>
+        <li>現在の構成は <code>db.t4g.micro</code>(コメントアウトで <code>db.t4g.medium</code> の選択肢あり)</li>
+      </ul>
+
+      <h3 id="storage">2-6. <code>allocated_storage</code> と <code>storage_type</code></h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>環境</th><th><code>allocated_storage</code></th><th><code>storage_type</code></th></tr>
+          </thead>
+          <tbody>
+            <tr><td>ステージング</td><td><code>20</code> GB</td><td><code>gp3</code></td></tr>
+            <tr><td>本番</td><td><code>100</code> GB 以上</td><td><code>gp3</code> または <code>io2</code>(高IOPS要件時)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><strong>ストレージタイプの選び方</strong>:</p>
+      <ul>
+        <li><code>gp3</code>: 汎用SSD、コスト効率が良くベースライン 3,000 IOPS。<strong>ほとんどのワークロードで第一候補</strong></li>
+        <li><code>io2</code>: プロビジョンドIOPS、99.999% の耐久性。月数百GB以上 + 高頻度書き込み時のみ</li>
+        <li><code>gp2</code>: 旧世代、<code>gp3</code> より割高なため新規利用は非推奨</li>
+      </ul>
+
+      <p><strong>Storage Autoscaling</strong>:</p>
+      <ul>
+        <li><code>max_allocated_storage</code> を設定すると自動拡張される(縮小は不可)</li>
+        <li>本番では必ず設定し、急激なデータ増加でDB停止する事故を防ぐ</li>
+      </ul>
+
+      <h3 id="perf-monitoring">2-7. <code>performance_insights_enabled</code> と <code>monitoring_interval</code></h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>環境</th><th>Performance Insights</th><th>Enhanced Monitoring</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>ステージング</td><td><code>false</code></td><td><code>0</code>(無効)</td></tr>
+            <tr><td>本番</td><td><strong><code>true</code></strong></td><td><code>60</code> 秒</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><strong>Performance Insights</strong>:</p>
+      <ul>
+        <li><strong>直近7日間は無料</strong>、長期保持(最大2年)は有料</li>
+        <li>スロークエリ・ロック待ち・トップSQLが可視化される</li>
+        <li>本番の性能トラブルは Performance Insights が無いと原因特定がほぼ不可能</li>
+      </ul>
+
+      <p><strong>Enhanced Monitoring</strong>:</p>
+      <ul>
+        <li>OS レベルのメトリクス(プロセス、ディスクIO、ネットワーク)を CloudWatch に送信</li>
+        <li>インターバルが短いほど課金が増える(<code>60</code> 秒なら月数ドル程度)</li>
+        <li>AWS Trusted Advisor の Operational Excellence チェック項目</li>
+      </ul>
+
+      <h4>Enhanced Monitoring 用 IAM ロールについて</h4>
+
+      <p>Enhanced Monitoring を有効化(<code>monitoring_interval &gt; 0</code>)するには、<strong>RDS が CloudWatch Logs にメトリクスを書き込むための IAM ロール</strong> を事前に作成し、<code>monitoring_role_arn</code> に指定する必要がある。</p>
+
+      <p><strong>IAM ロールの作成方法による違い</strong>:</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>作成方法</th><th>自動作成</th><th>備考</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>AWS マネジメントコンソール</td><td>あり</td><td>インスタンス作成画面で「Default」を選ぶと、コンソールが裏で <code>rds-monitoring-role</code> を自動生成して紐付ける</td></tr>
+            <tr><td>Terraform / AWS CLI / API</td><td>なし</td><td><code>monitoring_role_arn</code> に <strong>明示的に IAM ロール ARN を渡す必要がある</strong>。未指定だと <code>InvalidParameterValue</code> エラーになる</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><strong>IAM ロールの要件</strong>:</p>
+      <ul>
+        <li><strong>信頼ポリシー</strong>: <code>monitoring.rds.amazonaws.com</code> が <code>sts:AssumeRole</code> 可能であること</li>
+        <li><strong>アタッチするポリシー</strong>: AWS マネージドポリシー <code>arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole</code>(書き込み先 CloudWatch Logs グループへの権限が含まれる)</li>
+        <li><strong>料金</strong>: IAM ロール自体の料金は <strong>無料</strong>(Enhanced Monitoring のメトリクス送信料金のみ発生)</li>
+      </ul>
+
+      <p><strong>本プロジェクトでの実装</strong>:</p>
+
+      <p><code>terraform/modules/app-infrastructure/iam_role.tf</code> にて、他の IAM ロールと同様に <code>terraform-aws-modules/iam/aws//modules/iam-role</code> モジュールで定義している。<code>create = var.rds_monitoring_interval &gt; 0</code> により、Enhanced Monitoring が無効なステージング環境では <strong>ロール自体が作成されない</strong>(不要リソースが残らない)。</p>
+
+<pre><code class="language-hcl">module "rds_enhanced_monitoring_role" {
+  source = "terraform-aws-modules/iam/aws//modules/iam-role"
+
+  create = var.rds_monitoring_interval &gt; 0
+
+  name            = "${var.project_name}-rds-enhanced-monitoring"
+  use_name_prefix = false
+
+  trust_policy_permissions = {
+    rds_monitoring = {
+      actions = ["sts:AssumeRole"]
+      principals = [{
+        type        = "Service"
+        identifiers = ["monitoring.rds.amazonaws.com"]
+      }]
+    }
+  }
+
+  policies = {
+    AmazonRDSEnhancedMonitoringRole = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
+  }
+}</code></pre>
+
+      <p>RDS 側では条件付きで ARN を参照:</p>
+
+<pre><code class="language-hcl">monitoring_interval = var.rds_monitoring_interval
+monitoring_role_arn = var.rds_monitoring_interval &gt; 0 ? module.rds_enhanced_monitoring_role.arn : null</code></pre>
+
+      <h3 id="apply-immediately">2-8. <code>apply_immediately</code>(変更の即時適用)</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>環境</th><th>推奨値</th><th>理由</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>ステージング</td><td><code>true</code></td><td>検証を素早く回したい</td></tr>
+            <tr><td>本番</td><td><strong><code>false</code></strong></td><td>メンテナンスウィンドウまで待ち、計画停止のみで反映</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout warning">
+        <div class="callout-title">注意</div>
+        <p>パラメータグループの変更や <code>instance_class</code> 変更は再起動を伴う。本番で <code>apply_immediately = true</code> のまま <code>instance_class</code> を変えると <strong>即座にダウンタイム</strong> が発生する。</p>
+      </div>
+
+      <h3 id="logs-exports-detail">2-9. <code>enabled_cloudwatch_logs_exports</code></h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>環境</th><th>推奨値</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>ステージング</td><td><code>["error"]</code></td></tr>
+            <tr><td>本番</td><td><code>["error", "slowquery", "general", "audit"]</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <ul>
+        <li><code>error</code>: エラーログ(必須)</li>
+        <li><code>slowquery</code>: スロークエリログ(パフォーマンス分析)</li>
+        <li><code>general</code>: 全クエリ(容量大、監査要件があれば)</li>
+        <li><code>audit</code>: 監査ログ(プラグイン要、コンプライアンス用)</li>
+      </ul>
+
+      <p>ログ容量に応じて CloudWatch Logs の課金が増えるため、本番でも要件に応じて選択。</p>
+
+      <h3 id="encryption">2-10. <code>storage_encrypted</code>(保管時暗号化)</h3>
+
+      <p>両環境で <strong><code>true</code> 必須</strong>。後から変更不可(スナップショットからの復元が必要)。Security Hub / Control Tower の必須コントロール。</p>
+
+      <h3 id="other-prod">2-11. その他の本番推奨設定(共通で有効化済 or 検討項目)</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>設定</th><th>推奨</th><th>現状</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>publicly_accessible</code></td><td><code>false</code>(必須)</td><td>設定済</td></tr>
+            <tr><td><code>auto_minor_version_upgrade</code></td><td><code>true</code></td><td>設定済</td></tr>
+            <tr><td><code>iam_database_authentication_enabled</code></td><td><code>true</code></td><td>RDS Proxy + IAM 認証で対応済</td></tr>
+            <tr><td><code>copy_tags_to_snapshot</code></td><td><code>true</code></td><td>設定済</td></tr>
+            <tr><td><code>monitoring_role_arn</code></td><td>Enhanced Monitoring 用 IAM ロール</td><td><code>iam_role.tf</code> で条件付き作成(<code>var.rds_monitoring_interval &gt; 0</code> のときのみ)</td></tr>
+            <tr><td><code>parameter_group_name</code></td><td>カスタムパラメータグループ</td><td>デフォルト使用中</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <hr>
+
+      <h2 id="tf-recommended">3. 推奨 Terraform 構成</h2>
+
+      <h3 id="env-variables">3-1. 環境別変数(実装済)</h3>
+
+      <p><code>modules/app-infrastructure/variables.tf</code> に以下8つの変数を定義済み:</p>
+
+<pre><code class="language-hcl">variable "rds_multi_az" {
+  type    = bool
+  default = false
+}
+
+variable "rds_backup_retention_period" {
+  type    = number
+  default = 7
+}
+
+variable "rds_instance_class" {
+  type    = string
+  default = "db.t4g.micro"
+}
+
+variable "rds_skip_final_snapshot" {
+  type    = bool
+  default = true
+}
+
+variable "rds_apply_immediately" {
+  type    = bool
+  default = true
+}
+
+variable "rds_enabled_cloudwatch_logs_exports" {
+  type    = list(string)
+  default = ["error"]
+}
+
+variable "rds_performance_insights_enabled" {
+  type    = bool
+  default = false
+}
+
+variable "rds_monitoring_interval" {
+  type    = number
+  default = 0
+}</code></pre>
+
+      <p><code>monitoring_interval &gt; 0</code> の場合は Enhanced Monitoring 用の IAM ロール(<code>AmazonRDSEnhancedMonitoringRole</code> 付与)も自動作成される。</p>
+
+      <h3 id="stg-values">3-2. ステージング環境の設定値(実装済)</h3>
+
+      <p><code>stg/terraform.tfvars</code>:</p>
+
+<pre><code class="language-hcl"># --- RDS(ステージング設定) ---
+rds_multi_az                        = false
+rds_backup_retention_period         = 3
+rds_instance_class                  = "db.t4g.micro"
+rds_skip_final_snapshot             = true
+rds_apply_immediately               = true
+rds_enabled_cloudwatch_logs_exports = ["error"]
+rds_performance_insights_enabled    = false
+rds_monitoring_interval             = 0</code></pre>
+
+      <h3 id="prod-values">3-3. 本番環境を追加する場合(将来的な拡張)</h3>
+
+      <p><code>prod/terraform.tfvars</code>(新規作成想定):</p>
+
+<pre><code class="language-hcl"># --- RDS(本番設定) ---
+rds_multi_az                        = true
+rds_backup_retention_period         = 14
+rds_instance_class                  = "db.m6g.large"
+rds_skip_final_snapshot             = false  # 別途 final_snapshot_identifier の指定も必要
+rds_apply_immediately               = false
+rds_enabled_cloudwatch_logs_exports = ["error", "slowquery"]
+rds_performance_insights_enabled    = true   # 7日無料枠で十分
+rds_monitoring_interval             = 60     # 60秒間隔ならコストは月数ドル
+
+# 以下はまだ変数化されていない項目(将来 variables.tf に追加すべき)
+# rds_allocated_storage     = 100
+# rds_max_allocated_storage = 500
+# rds_deletion_protection   = true</code></pre>
+
+      <hr>
+
+      <h2 id="checklist">4. ステージングから本番へ昇格する際のチェックリスト</h2>
+
+      <p>ステージング環境で動作確認後、本番環境を構築する際は以下を必ず確認する:</p>
+
+      <ul class="task-list">
+        <li><code>multi_az = true</code> を設定</li>
+        <li><code>backup_retention_period &gt;= 14</code></li>
+        <li><code>deletion_protection = true</code></li>
+        <li><code>skip_final_snapshot = false</code> + <code>final_snapshot_identifier</code> 指定</li>
+        <li><code>apply_immediately = false</code>(メンテナンスウィンドウで反映)</li>
+        <li><code>instance_class</code> を本番ワークロード相当に変更(最低 <code>db.t4g.medium</code>)</li>
+        <li><code>allocated_storage</code> を増加 + <code>max_allocated_storage</code> 設定</li>
+        <li><code>performance_insights_enabled = true</code></li>
+        <li><code>monitoring_interval = 60</code> + Enhanced Monitoring 用 IAM ロール</li>
+        <li><code>enabled_cloudwatch_logs_exports</code> にスロークエリを追加</li>
+        <li>CloudWatch アラーム設定(CPU、接続数、ストレージ残量、レプリカラグ)</li>
+        <li>バックアップウィンドウとメンテナンスウィンドウが業務時間外であること</li>
+        <li>AWS Backup でクロスリージョンバックアップを検討(DR要件次第)</li>
+      </ul>
+
+      <hr>
+
+      <h2 id="cost-estimate">5. コスト試算(参考、東京リージョン)</h2>
+
+      <p><code>db.t4g.micro</code> ベースで試算:</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>項目</th><th>ステージング(現状)</th><th>本番(推奨)</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>インスタンス(<code>db.t4g.micro</code> × Single-AZ)</td><td>$13/月</td><td>-</td></tr>
+            <tr><td>インスタンス(<code>db.t4g.medium</code> × Multi-AZ)</td><td>-</td><td>$122/月</td></tr>
+            <tr><td>ストレージ(<code>gp3</code> 20GB)</td><td>$2.4/月</td><td>-</td></tr>
+            <tr><td>ストレージ(<code>gp3</code> 100GB × Multi-AZ)</td><td>-</td><td>$24/月</td></tr>
+            <tr><td>バックアップ(保持3日、変更率5%)</td><td>ほぼ$0</td><td>-</td></tr>
+            <tr><td>バックアップ(保持14日、100GB DB)</td><td>-</td><td>約$5/月</td></tr>
+            <tr><td>Performance Insights(7日無料枠)</td><td>$0</td><td>$0</td></tr>
+            <tr><td>Enhanced Monitoring(60秒間隔)</td><td>$0</td><td>約$2/月</td></tr>
+            <tr><td><strong>合計目安</strong></td><td><strong>約$15/月</strong></td><td><strong>約$153/月</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>本番が約10倍のコストになるが、可用性・観測性・データ保護の観点で必要なコストである。</p>
+
+      <hr>
+
+      <h2 id="waf">6. 参考: AWS Well-Architected Framework での位置づけ</h2>
+
+      <ul>
+        <li><strong>REL13-BP02 Use defined recovery strategies</strong>: Multi-AZ は「near DR(in-Region DR)」に該当。RTO/RPO がより厳しい場合はクロスリージョン Read Replica を検討</li>
+        <li><strong>REL09 Back up data</strong>: 自動バックアップ + PITR は最小要件。長期保持は AWS Backup</li>
+        <li><strong>SEC08 Protect data at rest</strong>: <code>storage_encrypted = true</code> は必須</li>
+        <li><strong>OPS04 Implement observability</strong>: Performance Insights + Enhanced Monitoring + CloudWatch Logs</li>
+      </ul>
+
+      <hr>
+
+      <h2 id="summary">7. まとめ</h2>
+
+      <p>このプロジェクトの現状(ステージングのみ)では、以下の最小変更で本番準備が整う:</p>
+
+      <ol>
+        <li><code>multi_az</code> を変数化(実装済)</li>
+        <li><code>backup_retention_period</code> を変数化(実装済)</li>
+        <li><code>instance_class</code> を変数化(実装済)</li>
+        <li><code>skip_final_snapshot</code> を変数化(実装済)</li>
+        <li><code>apply_immediately</code> を変数化(実装済)</li>
+        <li><code>enabled_cloudwatch_logs_exports</code> を変数化(実装済)</li>
+        <li><code>performance_insights_enabled</code> を変数化(実装済、Enhanced Monitoring 用 IAM ロールも自動作成)</li>
+        <li><code>monitoring_interval</code> を変数化(実装済)</li>
+        <li>本番環境用ディレクトリ(<code>terraform/prod/</code>)の追加</li>
+        <li><code>deletion_protection</code>、<code>allocated_storage</code>、<code>max_allocated_storage</code> の追加変数化</li>
+        <li>CloudWatch アラーム(CPU、接続数、ストレージ残量、レプリカラグ)の設定</li>
+      </ol>
+
+      <p>ステージングは現状のままコスト最適化を維持し、本番ではこのドキュメントの推奨値を適用することで、可用性・コストのバランスが取れた RDS 運用が可能になる。</p>
+
+      <p>特に CloudWatch 関連の3機能(Performance Insights / Enhanced Monitoring / Logs Exports)は、適切に設定すれば <strong>本番でも月 $5 以下</strong> で観測性を大幅に向上できる、コスパの良い投資である。</p>
+    </main>
+  </div>
+
+  <!-- Prism.js (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+</body>
+</html>

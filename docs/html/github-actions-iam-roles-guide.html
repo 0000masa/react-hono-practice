@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GitHub Actions IAM ロール設定ガイド</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" media="(prefers-color-scheme: light)">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" media="(prefers-color-scheme: dark)">
+</head>
+<body>
+  <div class="layout">
+    <!-- ============================ SIDEBAR ============================ -->
+    <aside class="sidebar">
+      <h2>このページ</h2>
+      <ul>
+        <li><a href="#secrets-list">設定する Secrets 一覧</a></li>
+        <li>
+          <a href="#secret-values">設定値 (架空アカウント ID 123456789012)</a>
+          <ul>
+            <li><a href="#repository-secret" class="toc-h3">Repository secret</a></li>
+            <li><a href="#stg-secrets" class="toc-h3">Environment secret (stg)</a></li>
+            <li><a href="#prod-secrets" class="toc-h3">Environment secret (prod)</a></li>
+          </ul>
+        </li>
+        <li><a href="#repo-secret-setup">Repository secret の設定手順</a></li>
+        <li>
+          <a href="#env-secret-setup">Environment secret の設定手順</a>
+          <ul>
+            <li><a href="#create-environment" class="toc-h3">Environment の作成 (まだ存在しない場合のみ)</a></li>
+            <li><a href="#register-secret" class="toc-h3">Secret の登録</a></li>
+            <li><a href="#required-reviewers" class="toc-h3">(任意) Required reviewers の設定</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#legacy-mapping">旧 Secret との対応関係</a>
+          <ul>
+            <li><a href="#migration-steps" class="toc-h3">移行手順</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#verification">動作確認</a>
+          <ul>
+            <li><a href="#stg-verification" class="toc-h3">stg 環境での確認</a></li>
+            <li><a href="#prod-verification" class="toc-h3">prod 環境での確認</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#troubleshooting">トラブルシューティング</a>
+          <ul>
+            <li><a href="#not-authorized" class="toc-h3">Not authorized to perform sts:AssumeRoleWithWebIdentity</a></li>
+            <li><a href="#no-credentials" class="toc-h3">Could not load credentials from any providers</a></li>
+            <li><a href="#access-denied" class="toc-h3">AccessDenied</a></li>
+          </ul>
+        </li>
+        <li><a href="#related-files">関連ファイル</a></li>
+      </ul>
+    </aside>
+
+    <!-- ============================ CONTENT ============================ -->
+    <main class="content">
+      <nav class="breadcrumb" aria-label="breadcrumb">
+        <a href="../../README.md">プロジェクト</a>
+        <span class="breadcrumb-sep">/</span>
+        <span>docs</span>
+        <span class="breadcrumb-sep">/</span>
+        <span>github-actions-iam-roles-guide</span>
+      </nav>
+
+      <h1>GitHub Actions IAM ロール設定ガイド</h1>
+
+      <p><code>.github/workflows/</code> の各 GitHub Actions ワークフローが、Terraform で作成した最小権限 IAM ロールに OIDC 経由で AssumeRole するための GitHub Secrets 設定方法をまとめます。</p>
+
+      <p>対象読者: 本リポジトリのインフラ運用担当者。</p>
+
+      <div class="callout note">
+        <div class="callout-title">TL;DR</div>
+        <ul>
+          <li>用途別の最小権限ロールを Terraform (<code>terraform/modules/app-infrastructure/iam_github_actions.tf</code>) で 7 個作成済み</li>
+          <li>共通の ECR デプロイ用ロール 1 個を <strong>Repository secret</strong> に、環境別ロール 6 個 (stg/prod × 3 用途) を <strong>Environment secrets</strong> に登録する</li>
+          <li>Environment secrets は stg/prod それぞれの environment 内に<strong>同じ secret 名で値だけ違える</strong>ことで、ワークフロー YAML 側は単一の参照式で stg/prod を自動切り替えできる</li>
+        </ul>
+      </div>
+
+      <p>以下の例では AWS アカウント ID を <code>123456789012</code> (架空) としています。実際の登録時は自身の AWS アカウント ID に置き換えてください。</p>
+
+      <hr>
+
+      <h2 id="secrets-list">1. 設定する Secrets 一覧</h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Secret 名</th>
+              <th>配置場所</th>
+              <th>用途</th>
+              <th>対応 IAM ロール</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>AWS_ECR_DEPLOY_ROLE_ARN</code></td>
+              <td>Repository secret</td>
+              <td>ECR への Docker イメージ push</td>
+              <td><code>react-hono-practice-github-actions-ecr-deploy-role</code></td>
+            </tr>
+            <tr>
+              <td><code>AWS_LAMBDA_UPDATE_ROLE_ARN</code></td>
+              <td>Environment secret (<code>stg</code>)</td>
+              <td>Lambda コード更新 (stg)</td>
+              <td><code>practice-stg-github-actions-lambda-update-role</code></td>
+            </tr>
+            <tr>
+              <td><code>AWS_LAMBDA_UPDATE_ROLE_ARN</code></td>
+              <td>Environment secret (<code>prod</code>)</td>
+              <td>Lambda コード更新 (prod)</td>
+              <td><code>practice-prod-github-actions-lambda-update-role</code></td>
+            </tr>
+            <tr>
+              <td><code>AWS_DB_TASK_INVOKE_ROLE_ARN</code></td>
+              <td>Environment secret (<code>stg</code>)</td>
+              <td>db-task Lambda の invoke (stg)</td>
+              <td><code>practice-stg-github-actions-db-task-invoke-role</code></td>
+            </tr>
+            <tr>
+              <td><code>AWS_DB_TASK_INVOKE_ROLE_ARN</code></td>
+              <td>Environment secret (<code>prod</code>)</td>
+              <td>db-task Lambda の invoke (prod)</td>
+              <td><code>practice-prod-github-actions-db-task-invoke-role</code></td>
+            </tr>
+            <tr>
+              <td><code>AWS_FRONTEND_DEPLOY_ROLE_ARN</code></td>
+              <td>Environment secret (<code>stg</code>)</td>
+              <td>フロント S3 sync + CloudFront invalidate (stg)</td>
+              <td><code>practice-stg-github-actions-frontend-deploy-role</code></td>
+            </tr>
+            <tr>
+              <td><code>AWS_FRONTEND_DEPLOY_ROLE_ARN</code></td>
+              <td>Environment secret (<code>prod</code>)</td>
+              <td>フロント S3 sync + CloudFront invalidate (prod)</td>
+              <td><code>practice-prod-github-actions-frontend-deploy-role</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>参照する workflow との対応:</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Workflow</th>
+              <th>参照する Secret</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>deploy-ecr-backend-lambda.yml</code></td>
+              <td><code>AWS_ECR_DEPLOY_ROLE_ARN</code> (Repository)</td>
+            </tr>
+            <tr>
+              <td><code>update-lambda.yml</code></td>
+              <td><code>AWS_LAMBDA_UPDATE_ROLE_ARN</code> (Environment)</td>
+            </tr>
+            <tr>
+              <td><code>invoke-db-task.yml</code></td>
+              <td><code>AWS_DB_TASK_INVOKE_ROLE_ARN</code> (Environment)</td>
+            </tr>
+            <tr>
+              <td><code>s3-deploy-frontend.yml</code></td>
+              <td><code>AWS_FRONTEND_DEPLOY_ROLE_ARN</code> (Environment)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><code>terraform-apply-plan.yml</code> / <code>terraform-stg-destroy.yml</code> が参照する <code>AWS_TERRAFORM_ROLE_ARN</code> は手動作成ロールのまま据え置きで、本ガイドの対象外です。</p>
+
+      <hr>
+
+      <h2 id="secret-values">2. 設定値 (架空アカウント ID <code>123456789012</code>)</h2>
+
+      <h3 id="repository-secret">Repository secret</h3>
+
+<pre class="diagram"><code>AWS_ECR_DEPLOY_ROLE_ARN
+  = arn:aws:iam::123456789012:role/react-hono-practice-github-actions-ecr-deploy-role</code></pre>
+
+      <h3 id="stg-secrets">Environment secret (<code>stg</code>)</h3>
+
+<pre class="diagram"><code>AWS_LAMBDA_UPDATE_ROLE_ARN
+  = arn:aws:iam::123456789012:role/practice-stg-github-actions-lambda-update-role
+
+AWS_DB_TASK_INVOKE_ROLE_ARN
+  = arn:aws:iam::123456789012:role/practice-stg-github-actions-db-task-invoke-role
+
+AWS_FRONTEND_DEPLOY_ROLE_ARN
+  = arn:aws:iam::123456789012:role/practice-stg-github-actions-frontend-deploy-role</code></pre>
+
+      <h3 id="prod-secrets">Environment secret (<code>prod</code>)</h3>
+
+<pre class="diagram"><code>AWS_LAMBDA_UPDATE_ROLE_ARN
+  = arn:aws:iam::123456789012:role/practice-prod-github-actions-lambda-update-role
+
+AWS_DB_TASK_INVOKE_ROLE_ARN
+  = arn:aws:iam::123456789012:role/practice-prod-github-actions-db-task-invoke-role
+
+AWS_FRONTEND_DEPLOY_ROLE_ARN
+  = arn:aws:iam::123456789012:role/practice-prod-github-actions-frontend-deploy-role</code></pre>
+
+      <div class="callout tip">
+        <div class="callout-title">ヒント</div>
+        <p>実際のロール ARN は <code>terraform apply</code> 完了後、AWS マネジメントコンソールの「IAM → ロール」または <code>aws iam get-role --role-name &lt;ロール名&gt; --query 'Role.Arn'</code> で取得できます。</p>
+      </div>
+
+      <hr>
+
+      <h2 id="repo-secret-setup">3. Repository secret の設定手順</h2>
+
+      <p><code>AWS_ECR_DEPLOY_ROLE_ARN</code> のみが対象です。</p>
+
+      <ol>
+        <li>GitHub リポジトリのページを開きます。</li>
+        <li><strong>Settings → Secrets and variables → Actions</strong> を選択します。</li>
+        <li><strong>Secrets</strong> タブの <strong>New repository secret</strong> をクリックします。</li>
+        <li>以下を入力して <strong>Add secret</strong> をクリックします。
+          <ul>
+            <li><strong>Name</strong>: <code>AWS_ECR_DEPLOY_ROLE_ARN</code></li>
+            <li><strong>Secret</strong>: <code>arn:aws:iam::123456789012:role/react-hono-practice-github-actions-ecr-deploy-role</code></li>
+          </ul>
+        </li>
+      </ol>
+
+      <hr>
+
+      <h2 id="env-secret-setup">4. Environment secret の設定手順</h2>
+
+      <p>stg / prod それぞれに 3 つずつ、計 6 個の Environment secret を登録します。</p>
+
+      <h3 id="create-environment">4.1 Environment の作成 (まだ存在しない場合のみ)</h3>
+
+      <ol>
+        <li><strong>Settings → Environments</strong> を選択します。</li>
+        <li><strong>New environment</strong> をクリックします。</li>
+        <li>名前に <code>stg</code> と入力して <strong>Configure environment</strong> をクリックします。</li>
+        <li>同様に <code>prod</code> も作成します。</li>
+      </ol>
+
+      <div class="callout note">
+        <div class="callout-title">補足</div>
+        <p>workflow 側で <code>environment: ${{ inputs.target_env }}</code> を指定しているため、environment 名は <code>stg</code> / <code>prod</code> と完全一致させてください (大文字小文字区別あり)。</p>
+      </div>
+
+      <h3 id="register-secret">4.2 Secret の登録</h3>
+
+      <ol>
+        <li><strong>Settings → Environments → stg</strong> を開きます。</li>
+        <li><strong>Environment secrets</strong> セクションの <strong>Add environment secret</strong> をクリックします。</li>
+        <li>以下の 3 つを順に登録します。
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Name</th><th>Secret</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>AWS_LAMBDA_UPDATE_ROLE_ARN</code></td>
+                  <td><code>arn:aws:iam::123456789012:role/practice-stg-github-actions-lambda-update-role</code></td>
+                </tr>
+                <tr>
+                  <td><code>AWS_DB_TASK_INVOKE_ROLE_ARN</code></td>
+                  <td><code>arn:aws:iam::123456789012:role/practice-stg-github-actions-db-task-invoke-role</code></td>
+                </tr>
+                <tr>
+                  <td><code>AWS_FRONTEND_DEPLOY_ROLE_ARN</code></td>
+                  <td><code>arn:aws:iam::123456789012:role/practice-stg-github-actions-frontend-deploy-role</code></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </li>
+        <li><code>prod</code> environment についても同様に開き、以下の 3 つを登録します。
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Name</th><th>Secret</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>AWS_LAMBDA_UPDATE_ROLE_ARN</code></td>
+                  <td><code>arn:aws:iam::123456789012:role/practice-prod-github-actions-lambda-update-role</code></td>
+                </tr>
+                <tr>
+                  <td><code>AWS_DB_TASK_INVOKE_ROLE_ARN</code></td>
+                  <td><code>arn:aws:iam::123456789012:role/practice-prod-github-actions-db-task-invoke-role</code></td>
+                </tr>
+                <tr>
+                  <td><code>AWS_FRONTEND_DEPLOY_ROLE_ARN</code></td>
+                  <td><code>arn:aws:iam::123456789012:role/practice-prod-github-actions-frontend-deploy-role</code></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </li>
+      </ol>
+
+      <div class="callout warning">
+        <div class="callout-title">注意</div>
+        <p>登録後、secret の値は GitHub UI 上で再表示できません (上書き登録のみ可能)。コピペ時に前後の空白や改行が混入しやすいので、貼り付けた直後に余分な空白がないか目視確認してください。AccessDenied になった場合は一度 secret を削除して再登録するのが確実です。</p>
+      </div>
+
+      <h3 id="required-reviewers">4.3 (任意) Required reviewers の設定</h3>
+
+      <p><code>prod</code> environment では、<code>Settings → Environments → prod → Deployment protection rules</code> で <code>Required reviewers</code> を設定すると、prod へのデプロイ実行前に承認が必要になります。本番リリースの誤実行防止になります。</p>
+
+      <hr>
+
+      <h2 id="legacy-mapping">5. 旧 Secret との対応関係</h2>
+
+      <p>ロールの分割に伴い、以下の旧 secret は新名へ移行しました。</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>旧 Secret 名</th>
+              <th>新 Secret 名</th>
+              <th>配置</th>
+              <th>備考</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>AWS_LAMBDA_DEPLOY_ROLE_ARN</code> (共通)</td>
+              <td><code>AWS_LAMBDA_UPDATE_ROLE_ARN</code> + <code>AWS_DB_TASK_INVOKE_ROLE_ARN</code></td>
+              <td>Environment (stg/prod)</td>
+              <td>用途が混在していたため 2 つに分割</td>
+            </tr>
+            <tr>
+              <td><code>AWS_S3_DEPLOY_ROLE_ARN</code></td>
+              <td><code>AWS_FRONTEND_DEPLOY_ROLE_ARN</code></td>
+              <td>Environment (stg/prod)</td>
+              <td>命名を実態に合わせて変更</td>
+            </tr>
+            <tr>
+              <td><code>AWS_ECR_DEPLOY_ROLE_ARN</code></td>
+              <td>(同名)</td>
+              <td>Repository</td>
+              <td>名前は同じ。実体ロールが手動作成→ Terraform 管理に切り替わる</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="migration-steps">移行手順</h3>
+
+      <ol>
+        <li>Terraform で新ロールを apply する (<code>terraform/stg/</code> で <code>terraform apply</code>)</li>
+        <li>本ガイドのとおりに新 secret を登録する</li>
+        <li>workflow を <code>workflow_dispatch</code> で 1 つずつ実行し、各ロールで AssumeRole に成功することを確認する</li>
+        <li>全 workflow が新ロールで正常動作するのを確認したのち、旧 secret (<code>AWS_LAMBDA_DEPLOY_ROLE_ARN</code>, <code>AWS_S3_DEPLOY_ROLE_ARN</code>) を <strong>Settings → Secrets and variables → Actions</strong> から削除する</li>
+        <li>古い手動 IAM ロール (旧 <code>AWS_ECR_DEPLOY_ROLE_ARN</code> の実体ロール、Lambda/S3 用の共通ロール) を AWS コンソールから削除する</li>
+      </ol>
+
+      <hr>
+
+      <h2 id="verification">6. 動作確認</h2>
+
+      <h3 id="stg-verification">6.1 stg 環境での確認</h3>
+
+      <p>それぞれの workflow を <strong>Actions → 該当 workflow → Run workflow</strong> から <code>target_env=stg</code> で <code>workflow_dispatch</code> 実行し、<code>Configure AWS credentials</code> ステップが成功することを確認します。</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Workflow</th>
+              <th>確認ポイント</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>deploy-ecr-backend-lambda.yml</code></td>
+              <td>ECR に新しい image tag (<code>sha-&lt;commit&gt;</code>) が push されている</td>
+            </tr>
+            <tr>
+              <td><code>update-lambda.yml</code></td>
+              <td><code>practice-stg-*</code> の 5 関数が新しい image-uri に更新されている</td>
+            </tr>
+            <tr>
+              <td><code>invoke-db-task.yml</code> (<code>operation=migrate</code>)</td>
+              <td>戻り値の <code>response.json</code> が成功ステータスを返す</td>
+            </tr>
+            <tr>
+              <td><code>s3-deploy-frontend.yml</code></td>
+              <td>フロント URL に最新ビルドが反映され、CloudFront invalidation が作成される</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="prod-verification">6.2 prod 環境での確認</h3>
+
+      <p><code>prod</code> 用 secrets を <code>target_env=prod</code> で同様に検証します。事前に <code>required reviewers</code> を設定済みなら承認フローも走ることを確認します。</p>
+
+      <hr>
+
+      <h2 id="troubleshooting">7. トラブルシューティング</h2>
+
+      <h3 id="not-authorized"><code>Not authorized to perform sts:AssumeRoleWithWebIdentity</code></h3>
+
+      <p>信頼ポリシーの sub / ref / aud のいずれかが一致していません。確認順:</p>
+
+      <ol>
+        <li>workflow の <code>environment:</code> が <code>stg</code> / <code>prod</code> のいずれかに一致しているか</li>
+        <li>workflow の実行ブランチが信頼ポリシーで許可されているか (stg は <code>main</code> / <code>develop</code>、prod は <code>main</code>)</li>
+        <li>secret に登録されている ARN が、対応する環境のロールになっているか (例: <code>target_env=stg</code> なのに prod 用 ARN が登録されている)</li>
+      </ol>
+
+      <h3 id="no-credentials"><code>Could not load credentials from any providers</code></h3>
+
+      <p><code>role-to-assume</code> で参照する secret が未登録、または environment secret なのに repository scope で登録されています。Environment secret は workflow に <code>environment:</code> 句がないと読めない点に注意してください。</p>
+
+      <h3 id="access-denied"><code>AccessDenied: User: arn:aws:sts::...:assumed-role/... is not authorized to perform ...</code></h3>
+
+      <p>OIDC 認証は成功しているが、対象 AWS API へのポリシーが不足しています。<code>terraform/modules/app-infrastructure/iam_policy_github_actions.tf</code> の該当ポリシーに Action と Resource が含まれているか確認してください。</p>
+
+      <hr>
+
+      <h2 id="related-files">8. 関連ファイル</h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ファイル</th>
+              <th>役割</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>terraform/modules/app-infrastructure/iam_github_actions.tf</code></td>
+              <td>OIDC ロール 7 個の定義 (信頼ポリシー)</td>
+            </tr>
+            <tr>
+              <td><code>terraform/modules/app-infrastructure/iam_policy_github_actions.tf</code></td>
+              <td>各ロールにアタッチする最小権限ポリシー</td>
+            </tr>
+            <tr>
+              <td><code>.github/workflows/deploy-ecr-backend-lambda.yml</code></td>
+              <td>ECR push (Repository secret 利用)</td>
+            </tr>
+            <tr>
+              <td><code>.github/workflows/update-lambda.yml</code></td>
+              <td>Lambda コード更新 (Environment secret 利用)</td>
+            </tr>
+            <tr>
+              <td><code>.github/workflows/invoke-db-task.yml</code></td>
+              <td>db-task Lambda invoke (Environment secret 利用)</td>
+            </tr>
+            <tr>
+              <td><code>.github/workflows/s3-deploy-frontend.yml</code></td>
+              <td>フロント S3 デプロイ (Environment secret 利用)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <!-- Prism.js (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+</body>
+</html>

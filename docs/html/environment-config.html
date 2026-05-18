@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>環境変数設定</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" media="(prefers-color-scheme: light)">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" media="(prefers-color-scheme: dark)">
+</head>
+<body>
+  <div class="layout">
+    <!-- ============================ SIDEBAR ============================ -->
+    <aside class="sidebar">
+      <h2>このページ</h2>
+      <ul>
+        <li>
+          <a href="#env-list">環境変数一覧</a>
+          <ul>
+            <li><a href="#application" class="toc-h3">アプリケーション</a></li>
+            <li><a href="#database" class="toc-h3">データベース (MySQL)</a></li>
+            <li><a href="#auth" class="toc-h3">認証 (BetterAuth)</a></li>
+            <li><a href="#storage" class="toc-h3">ストレージ (S3/MinIO)</a></li>
+            <li><a href="#mail" class="toc-h3">メール (SMTP)</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#dev-prod-switch">Dev / Prod 切り替え</a>
+          <ul>
+            <li><a href="#dev-env" class="toc-h3">開発環境 (Docker Compose)</a></li>
+            <li><a href="#prod-env" class="toc-h3">本番環境 (Lambda)</a></li>
+          </ul>
+        </li>
+      </ul>
+    </aside>
+
+    <!-- ============================ CONTENT ============================ -->
+    <main class="content">
+      <nav class="breadcrumb" aria-label="breadcrumb">
+        <a href="../../README.md">プロジェクト</a>
+        <span class="breadcrumb-sep">/</span>
+        <span>docs</span>
+        <span class="breadcrumb-sep">/</span>
+        <span>environment-config</span>
+      </nav>
+
+      <h1>環境変数設定</h1>
+
+      <h2 id="env-list">環境変数一覧</h2>
+
+      <h3 id="application">アプリケーション</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>変数名</th>
+              <th>説明</th>
+              <th>デフォルト値</th>
+              <th>本番例</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>NODE_ENV</code></td>
+              <td>実行環境</td>
+              <td><code>development</code></td>
+              <td><code>production</code></td>
+            </tr>
+            <tr>
+              <td><code>PORT</code></td>
+              <td>サーバーポート</td>
+              <td><code>3000</code></td>
+              <td><code>3000</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="database">データベース (MySQL)</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>変数名</th>
+              <th>説明</th>
+              <th>デフォルト値</th>
+              <th>本番例</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>DATABASE_HOST</code></td>
+              <td>DB ホスト</td>
+              <td><code>mysql</code></td>
+              <td>RDS エンドポイント</td>
+            </tr>
+            <tr>
+              <td><code>DATABASE_PORT</code></td>
+              <td>DB ポート</td>
+              <td><code>3306</code></td>
+              <td><code>3306</code></td>
+            </tr>
+            <tr>
+              <td><code>DATABASE_NAME</code></td>
+              <td>DB 名</td>
+              <td><code>database</code></td>
+              <td><code>production_db</code></td>
+            </tr>
+            <tr>
+              <td><code>DATABASE_USER</code></td>
+              <td>DB ユーザー</td>
+              <td><code>user</code></td>
+              <td><code>admin</code></td>
+            </tr>
+            <tr>
+              <td><code>DATABASE_PASSWORD</code></td>
+              <td>DB パスワード</td>
+              <td><code>password</code></td>
+              <td>(Secrets Manager)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="auth">認証 (BetterAuth)</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>変数名</th>
+              <th>説明</th>
+              <th>デフォルト値</th>
+              <th>本番例</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>BETTER_AUTH_SECRET</code></td>
+              <td>セッション Cookie の署名と Cookie キャッシュの暗号化に使う秘密鍵。本番で未設定だとエラー</td>
+              <td><code>dev-secret-change-in-production</code></td>
+              <td>(SSM Parameter Store)</td>
+            </tr>
+            <tr>
+              <td><code>GOOGLE_CLIENT_ID</code></td>
+              <td>Google OAuth クライアント ID</td>
+              <td>(空)</td>
+              <td><code>xxxx.apps.googleusercontent.com</code></td>
+            </tr>
+            <tr>
+              <td><code>GOOGLE_CLIENT_SECRET</code></td>
+              <td>Google OAuth クライアントシークレット</td>
+              <td>(空)</td>
+              <td>(SSM Parameter Store)</td>
+            </tr>
+            <tr>
+              <td><code>FRONTEND_URL</code></td>
+              <td>フロントエンド URL</td>
+              <td><code>http://localhost:5173</code></td>
+              <td><code>https://example.com</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>BetterAuth は <code>FRONTEND_URL</code> + <code>basePath</code> からコールバック URL を自動生成する (例: <code>https://example.com/api/auth/callback/google</code>)。
+      そのため旧 Arctic 構成で使っていた <code>GOOGLE_CALLBACK_URL</code> は不要になった。</p>
+
+      <h3 id="storage">ストレージ (S3/MinIO)</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>変数名</th>
+              <th>説明</th>
+              <th>デフォルト値</th>
+              <th>本番例</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>S3_ENDPOINT</code></td>
+              <td>S3 エンドポイント</td>
+              <td>(空)</td>
+              <td>未設定 (AWS SDK がデフォルトで S3 に接続)</td>
+            </tr>
+            <tr>
+              <td><code>S3_BUCKET</code></td>
+              <td>バケット名</td>
+              <td><code>qrcodes</code></td>
+              <td><code>prod-qrcodes</code></td>
+            </tr>
+            <tr>
+              <td><code>S3_REGION</code></td>
+              <td>リージョン</td>
+              <td><code>us-east-1</code></td>
+              <td><code>ap-northeast-1</code></td>
+            </tr>
+            <tr>
+              <td><code>S3_ACCESS_KEY</code></td>
+              <td>アクセスキー</td>
+              <td>(空)</td>
+              <td>未設定 (Lambda 実行ロールの IAM 認証を使用)</td>
+            </tr>
+            <tr>
+              <td><code>S3_SECRET_KEY</code></td>
+              <td>シークレットキー</td>
+              <td>(空)</td>
+              <td>未設定 (同上)</td>
+            </tr>
+            <tr>
+              <td><code>S3_FORCE_PATH_STYLE</code></td>
+              <td>パススタイル</td>
+              <td><code>false</code></td>
+              <td><code>false</code></td>
+            </tr>
+            <tr>
+              <td><code>STORAGE_URL_BASE</code></td>
+              <td>ファイル URL ベース</td>
+              <td><code>http://localhost:9000/qrcodes</code></td>
+              <td><code>https://xxxx.cloudfront.net</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="mail">メール (SMTP)</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>変数名</th>
+              <th>説明</th>
+              <th>デフォルト値</th>
+              <th>本番例</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>SMTP_HOST</code></td>
+              <td>SMTP ホスト</td>
+              <td><code>mailpit</code></td>
+              <td><code>email-smtp.ap-northeast-1.amazonaws.com</code></td>
+            </tr>
+            <tr>
+              <td><code>SMTP_PORT</code></td>
+              <td>SMTP ポート</td>
+              <td><code>1025</code></td>
+              <td><code>587</code></td>
+            </tr>
+            <tr>
+              <td><code>SMTP_SECURE</code></td>
+              <td>TLS 使用</td>
+              <td><code>false</code></td>
+              <td><code>false</code> (STARTTLS)</td>
+            </tr>
+            <tr>
+              <td><code>MAIL_FROM</code></td>
+              <td>送信元アドレス</td>
+              <td><code>noreply@example.com</code></td>
+              <td><code>noreply@example.com</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="dev-prod-switch">Dev / Prod 切り替え</h2>
+
+      <h3 id="dev-env">開発環境 (Docker Compose)</h3>
+
+      <p><code>.env</code> ファイルで設定。Docker Compose のサービス名 (<code>mysql</code>, <code>minio</code>, <code>mailpit</code>) がホスト名として使用されます。
+      S3 関連はデフォルト値が空のため、<code>.env</code> に MinIO 用の値を明示的に設定する必要があります (<code>.env.example</code> を参照)。</p>
+
+      <h3 id="prod-env">本番環境 (Lambda)</h3>
+
+      <p>環境変数は Lambda の環境変数設定 (Terraform)、または SSM Parameter Store で管理:</p>
+
+      <ul>
+        <li><code>S3_ENDPOINT</code>, <code>S3_ACCESS_KEY</code>, <code>S3_SECRET_KEY</code> は <strong>未設定</strong> (Lambda 実行ロールの IAM 認証 + S3 デフォルトエンドポイントを使用)</li>
+        <li><code>S3_FORCE_PATH_STYLE</code> は <strong>未設定</strong> (デフォルト <code>false</code> = AWS S3 の仮想ホスト形式)</li>
+        <li><code>BETTER_AUTH_SECRET</code> は SSM Parameter Store から取得</li>
+        <li><code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code> は SSM Parameter Store から取得</li>
+        <li><code>FRONTEND_URL</code> に CloudFront ドメインを設定 (例: <code>https://www.example.com</code>)。BetterAuth がこの値からコールバック URL を自動生成する</li>
+        <li><code>STORAGE_URL_BASE</code> に CloudFront ドメインを設定</li>
+        <li><code>SMTP_HOST</code> に SES SMTP エンドポイントを設定</li>
+        <li>Cookie に <code>secure: true</code> が自動設定 (<code>NODE_ENV=production</code>)</li>
+      </ul>
+    </main>
+  </div>
+
+  <!-- Prism.js (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+</body>
+</html>

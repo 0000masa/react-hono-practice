@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ステージング環境 月額コスト見積もり</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" media="(prefers-color-scheme: light)">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" media="(prefers-color-scheme: dark)">
+</head>
+<body>
+  <div class="layout">
+    <!-- ============================ SIDEBAR ============================ -->
+    <aside class="sidebar">
+      <h2>このページ</h2>
+      <ul>
+        <li><a href="#summary">1. サマリ</a></li>
+        <li>
+          <a href="#breakdown">2. リソース別 内訳</a>
+          <ul>
+            <li><a href="#top-four" class="toc-h3">2.1 コストの大半を占めるトップ 4</a></li>
+            <li><a href="#small-fixed" class="toc-h3">2.2 恒常稼働する小額リソース</a></li>
+          </ul>
+        </li>
+        <li><a href="#hidden-costs">3. 見落としがちなコスト要因</a></li>
+        <li><a href="#reduction-options">4. コスト削減オプション (ステージング向け)</a></li>
+        <li><a href="#assumptions">5. 前提と免責</a></li>
+      </ul>
+    </aside>
+
+    <!-- ============================ CONTENT ============================ -->
+    <main class="content">
+      <nav class="breadcrumb" aria-label="breadcrumb">
+        <a href="../../README.md">プロジェクト</a>
+        <span class="breadcrumb-sep">/</span>
+        <span>docs</span>
+        <span class="breadcrumb-sep">/</span>
+        <span>cost-estimation</span>
+      </nav>
+
+      <h1>ステージング環境 月額コスト見積もり</h1>
+
+      <p><code>terraform/stg</code> から展開される <code>terraform/modules/app-infrastructure</code> の構成を対象に、東京リージョン (ap-northeast-1) の <strong>On-Demand 公開価格</strong> を用いて月額コストを概算する。</p>
+
+      <blockquote>
+        <ul>
+          <li>対象: <code>terraform.tfvars</code> のステージング値 (<code>rds_instance_class = db.t4g.micro</code> / <code>rds_multi_az = false</code> / <code>enable_nat_gateway = true</code> デフォルト)</li>
+          <li>前提: 1 か月 = 730 時間。税抜・USD。無料利用枠はアカウント全体で他用途に使われていない想定で控除。</li>
+          <li>価格は 2026 年時点の公開価格を参照した概算で、実際の請求額はトラフィックや為替で変動する。</li>
+          <li>本書は新規デプロイのためではなく、<strong>既に適用されている Terraform 構成</strong> のランニングコスト把握を目的とする。</li>
+        </ul>
+      </blockquote>
+
+      <h2 id="summary">1. サマリ</h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>分類</th>
+              <th>金額 (USD/月)</th>
+              <th>備考</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>常時起動コスト (fix)</strong></td><td><strong>約 $104</strong></td><td>インスタンス・Proxy・NAT・WAF など稼働有無に関わらず発生</td></tr>
+            <tr><td><strong>使用量課金 (variable)</strong></td><td><strong>約 $3〜8</strong></td><td>Lambda / CloudFront / ログ / API Gateway — トラフィック依存</td></tr>
+            <tr><td><strong>合計目安</strong></td><td><strong>約 $107〜$112 / 月</strong></td><td>約 <strong>16,000〜17,000 円 / 月</strong> (1 USD = 150 円換算)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <blockquote>
+        <p>ステージング想定のトラフィック (リクエスト数千〜1 万/月、CloudFront 配信数 GB 規模) を前提にした概算。実運用トラフィックが跳ねれば CloudFront / Lambda / NAT 処理料金が線形に増える。</p>
+      </blockquote>
+
+      <h2 id="breakdown">2. リソース別 内訳</h2>
+
+      <h3 id="top-four">2.1 コストの大半を占めるトップ 4</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>サービス</th>
+              <th>月額</th>
+              <th>内訳</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>1</td><td><strong>NAT Gateway</strong></td><td><strong>約 $45.3</strong></td><td>$0.062/時 × 730h = $45.26 + データ処理 $0.062/GB。single_nat_gateway=true で 1 台。</td></tr>
+            <tr><td>2</td><td><strong>RDS Proxy</strong></td><td><strong>約 $26.3</strong></td><td>$0.018/vCPU-時 × 2 vCPU (db.t4g.micro に対する最低 2 vCPU 分) × 730h。</td></tr>
+            <tr><td>3</td><td><strong>RDS (db.t4g.micro, Single-AZ)</strong></td><td><strong>約 $21.8</strong></td><td>インスタンス $0.026/h × 730h = $18.98 + gp3 20GB ($0.138/GB) = $2.76 + バックアップ 20GB (割当量以下で無料)。</td></tr>
+            <tr><td>4</td><td><strong>WAF (CloudFront scope)</strong></td><td><strong>約 $7.0</strong></td><td>Web ACL $5.00 + Managed Rule Group (CommonRuleSet) $1.00 + リクエスト $0.60/百万。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>この 4 つで <strong>約 $100 / 月</strong>。コスト削減を検討する場合、最初の着目点はここ。</p>
+
+      <h3 id="small-fixed">2.2 恒常稼働する小額リソース</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>サービス</th>
+              <th>月額</th>
+              <th>内訳</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>EC2 踏み台 (t4g.nano + gp3 8GB)</td><td>約 $4.7</td><td>インスタンス $0.0054/h × 730h = $3.94 + EBS gp3 $0.096/GB × 8GB = $0.77</td></tr>
+            <tr><td>CloudFront (2 ディストリビューション)</td><td>約 $1.5</td><td>転送料 $0.114/GB + 日本エッジ HTTPS $0.009/1 万リクエスト (5GB + 5 万 req 想定)</td></tr>
+            <tr><td>CloudWatch Logs (Lambda×4 + API GW)</td><td>約 $1.5</td><td>取込 $0.76/GB、保存 $0.033/GB・月、保持 30 日</td></tr>
+            <tr><td>Lambda (5 関数)</td><td>約 $1.0</td><td>$0.20/100 万リクエスト + $0.0000166667/GB・秒。stg トラフィックだと無料枠にほぼ収まる</td></tr>
+            <tr><td>Route53 ホストゾーン</td><td>$0.50</td><td>既存ゾーン (data source 参照)。クエリ数は概ね無料枠</td></tr>
+            <tr><td>Secrets Manager</td><td>$0.40</td><td>シークレット 1 個。30 日ローテーション (Lambda 起動は月 1 回)</td></tr>
+            <tr><td>CloudWatch Metric Alarm × 2</td><td>$0.20</td><td><code>lambda_api_errors</code> / <code>lambda_api_throttles</code></td></tr>
+            <tr><td>API Gateway (REST Regional)</td><td>&lt;$0.10</td><td>$4.25/100 万リクエスト。stg リクエスト数ではほぼゼロ</td></tr>
+            <tr><td>S3 (2 バケット)</td><td>&lt;$0.10</td><td>Standard $0.025/GB・月。数 GB 規模</td></tr>
+            <tr><td>SQS Standard</td><td>$0.00</td><td>月 100 万リクエストまで無料</td></tr>
+            <tr><td>SNS (email)</td><td>$0.00</td><td>月 1,000 通まで無料</td></tr>
+            <tr><td>SES</td><td>$0.00</td><td>Lambda/EC2 からの送信は月 62,000 通まで無料</td></tr>
+            <tr><td>EventBridge (daily)</td><td>$0.00</td><td>スケジュール起動 30 回/月 × $1/100 万 = 無視可</td></tr>
+            <tr><td>S3 Gateway Endpoint</td><td><strong>$0.00</strong></td><td>Gateway 型は無料</td></tr>
+            <tr><td>VPC / サブネット / SG</td><td><strong>$0.00</strong></td><td>VPC 本体は無料</td></tr>
+            <tr><td>ACM (CloudFront, us-east-1)</td><td><strong>$0.00</strong></td><td>パブリック証明書は無料</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="hidden-costs">3. 見落としがちなコスト要因</h2>
+
+      <h3 id="nat-gateway-max-cost">NAT Gateway が最大のコスト</h3>
+      <ul>
+        <li><code>enable_nat_gateway = true</code> (stg の variables 既定値) で 1 台常時稼働。</li>
+        <li>Lambda は VPC 内 (<code>private_subnets</code>) に配置されているため、SES / Secrets Manager / S3 以外への外向き通信 (外部 API、ECR Public 等) は NAT 経由 = <strong>時間単価 $45/月に加え、データ処理 $0.062/GB</strong> が発生。</li>
+        <li><strong>S3 Gateway Endpoint</strong> は既に配置済みで S3 通信のコスト増は避けている (GOOD)。</li>
+        <li>機能検証のみで夜間止めたい場合は <code>enable_nat_gateway = false</code> に切替える案があるが、その場合 Lambda から外部到達が必要な経路 (ECR Image pull は VPC Endpoint 経由・SES・CloudWatch 等) の代替を検討する必要がある。</li>
+      </ul>
+
+      <h3 id="rds-proxy-minimum">RDS Proxy のミニマム課金</h3>
+      <ul>
+        <li><code>aws_db_proxy</code> は <strong>アタッチ先 DB の vCPU 最小 2</strong> で課金される。<code>db.t4g.micro</code> (2 vCPU) に対しても固定 2 vCPU 分発生。</li>
+        <li>Lambda からの同時接続集約目的で入れているため停止しづらいが、停止できるなら $26/月が消える。</li>
+      </ul>
+
+      <h3 id="waf-fixed">WAF の固定費</h3>
+      <ul>
+        <li>CloudFront 向け WAF は利用有無に関わらず Web ACL $5 + Rule $1 が発生。ステージングで WAF 防御が必須でないなら Web ACL を外すと $6/月削減。</li>
+      </ul>
+
+      <h3 id="cloudwatch-retention">CloudWatch Logs 保持 30 日</h3>
+      <ul>
+        <li><code>retention_in_days = 30</code> が Lambda 4 本 + API GW で設定済み。取込量が少ないうちは $1〜2/月で収まるが、ログ量が増えるとここは急伸する。長期保管不要なら 7〜14 日へ短縮可能。</li>
+      </ul>
+
+      <h3 id="data-transfer">データ転送 (アウトバウンド)</h3>
+      <ul>
+        <li>CloudFront → ビューワ: 上記 CloudFront 料金に含まれる。</li>
+        <li>Lambda/EC2 → インターネット (NAT 経由): 処理料金 $0.062/GB は NAT Gateway 行に計上済み。</li>
+        <li>AZ 間転送: RDS は Single-AZ かつ Lambda/Proxy も同一 VPC 内で設計的には多くない想定。</li>
+      </ul>
+
+      <h2 id="reduction-options">4. コスト削減オプション (ステージング向け)</h2>
+
+      <p>優先度順の概算インパクト。</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>案</th>
+              <th>月額削減</th>
+              <th>備考</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>NAT Gateway を夜間/週末停止</strong> (例: 平日 10h 稼働に限定)</td><td>約 $30</td><td><code>enable_nat_gateway</code> を Terraform 外から起動/停止するスクリプトで運用。Lambda の外部通信断が発生して良いタイミングに限る。</td></tr>
+            <tr><td><strong>RDS Proxy を外す</strong></td><td>約 $26</td><td>Lambda から直接 RDS 接続へ切替。stg の同時実行数が低ければ現実的。IAM 認証も Proxy 前提なのでアプリ側改修要。</td></tr>
+            <tr><td><strong>WAF を外す</strong></td><td>約 $6</td><td>stg で WAF 保護が不要であれば削除。本番では残す。</td></tr>
+            <tr><td><strong>踏み台 EC2 を普段止める</strong></td><td>約 $4</td><td>使うときだけ <code>terraform apply -target</code> もしくは手動 start/stop。SSM Session Manager 経由なので再開は容易。</td></tr>
+            <tr><td><strong>ロググループ保持を 14 日へ短縮</strong></td><td>数 $</td><td>ログ量次第。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>全部実施すると約 <strong>$60/月</strong> 削減で、最小構成時の月額は <strong>約 $45〜$50</strong> 程度まで落ちる (RDS + 最低限の CloudFront/Route53/Secrets)。</p>
+
+      <h2 id="assumptions">5. 前提と免責</h2>
+
+      <ul>
+        <li>価格は ap-northeast-1 の <strong>On-Demand 公開価格</strong> を参照した机上見積もり。Savings Plans / Reserved Instance 未適用。</li>
+        <li>トラフィックが想定より多いケース (CloudFront 数十 GB/月、API 数十万リクエスト、外部 API 叩きで NAT データ多量通過) では使用量課金が跳ねる。</li>
+        <li><code>variable "enable_nat_gateway"</code> の既定値は <code>true</code>。明示的に <code>false</code> にすると NAT Gateway が消えて最大の削減になるが、Lambda からの外部到達が前提の機能 (例: Google OAuth、外部 API コール) は追加対処が要る。</li>
+        <li>本番 (<code>rds_multi_az = true</code> / <code>rds_instance_class</code> 引き上げ / <code>rds_monitoring_interval &gt; 0</code> / Performance Insights 有効) へ切り替えると、<strong>RDS 関連だけで月額が 2〜3 倍</strong> になる点に注意。</li>
+        <li>最新・正確な価格は AWS Pricing Calculator もしくは AWS コンソール上の Billing で要確認。</li>
+      </ul>
+    </main>
+  </div>
+
+  <!-- Prism.js (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+</body>
+</html>

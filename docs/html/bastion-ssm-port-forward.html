@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ローカル PC から SSM ポートフォワーディング経由で RDS に接続する</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" media="(prefers-color-scheme: light)">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" media="(prefers-color-scheme: dark)">
+</head>
+<body>
+  <div class="layout">
+    <!-- ============================ SIDEBAR ============================ -->
+    <aside class="sidebar">
+      <h2>このページ</h2>
+      <ul>
+        <li><a href="#overview">概要</a></li>
+        <li>
+          <a href="#why-private-subnet">なぜプライベートサブネットの踏み台に繋がるのか</a>
+          <ul>
+            <li><a href="#communication-details" class="toc-h3">通信の実体</a></li>
+            <li><a href="#three-options" class="toc-h3">プライベートサブネットで動かすための 3 つの選択肢</a></li>
+            <li><a href="#ssm-agent-check" class="toc-h3">SSM Agent が AWS と繋がっているかの確認</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#prerequisites">1. 前提</a>
+          <ul>
+            <li><a href="#local-install" class="toc-h3">ローカル PC にインストールしておくもの</a></li>
+            <li><a href="#aws-cli-credentials" class="toc-h3">AWS CLI の認証情報について</a></li>
+            <li><a href="#aws-permissions" class="toc-h3">AWS 側の権限</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#get-values">2. 必要な値を AWS コンソールから取得</a>
+          <ul>
+            <li><a href="#bastion-instance-id" class="toc-h3">a. 踏み台のインスタンス ID</a></li>
+            <li><a href="#rds-endpoint" class="toc-h3">b. RDS のエンドポイント</a></li>
+            <li><a href="#db-master-password" class="toc-h3">c. DB マスターパスワード</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#one-terminal-flow">3. 1 つのターミナルで接続から SQL 実行まで行う</a>
+          <ul>
+            <li><a href="#oneliner" class="toc-h3">ワンライナー</a></li>
+            <li><a href="#save-as-script" class="toc-h3">スクリプトとして保存したい場合</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#two-terminal-flow">4. 2 ターミナルに分ける方法（代替）</a>
+          <ul>
+            <li><a href="#terminal-a" class="toc-h3">ターミナル A: ポートフォワーディング</a></li>
+            <li><a href="#terminal-b" class="toc-h3">ターミナル B: mysql 接続</a></li>
+          </ul>
+        </li>
+        <li><a href="#troubleshooting">5. よくあるエラーと対処</a></li>
+        <li><a href="#rds-proxy-forward">6. 補足: RDS Proxy に転送したい場合</a></li>
+        <li><a href="#related-docs">関連ドキュメント</a></li>
+      </ul>
+    </aside>
+
+    <!-- ============================ CONTENT ============================ -->
+    <main class="content">
+      <nav class="breadcrumb" aria-label="breadcrumb">
+        <a href="../../README.md">プロジェクト</a>
+        <span class="breadcrumb-sep">/</span>
+        <span>docs</span>
+        <span class="breadcrumb-sep">/</span>
+        <span>bastion-ssm-port-forward</span>
+      </nav>
+
+      <h1>ローカル PC から SSM ポートフォワーディング経由で RDS に接続する</h1>
+
+      <h2 id="overview">概要</h2>
+
+      <p>RDS はプライベートサブネットに配置されており、通常の経路では Lambda 経由でしか触れない。開発中の調査や手動データ修正のため、<strong>Session Manager のポートフォワーディング機能</strong>で踏み台 EC2 を中継して RDS に接続する手順をまとめる。</p>
+
+      <p>SSH は使わず、踏み台には公開鍵も 22 番ポートも開けていない。すべて AWS API + IAM 認証でアクセスする。</p>
+
+<pre class="diagram"><code>ローカル PC                AWS
+  │                         │
+  │  aws ssm start-session  │   ssmmessages (TLS)
+  │ ───────────────────────►│── ──────────────► Bastion EC2 (private subnet)
+  │                         │                     │
+  │                         │                     │ TCP 3306
+  │ ◄── localhost:13306 ◄──── ─────────────────── ▼
+  │         (mysql CLI)     │                   RDS (MySQL 8.4)</code></pre>
+
+      <p><code>localhost:13306</code> が踏み台経由で RDS の 3306 にそのまま転送される。ローカルの <code>mysql</code> コマンドは RDS を意識せず <code>-h 127.0.0.1</code> で接続する。</p>
+
+      <hr>
+
+      <h2 id="why-private-subnet">なぜプライベートサブネットの踏み台に繋がるのか</h2>
+
+      <p>「プライベートサブネット + パブリック IP 無し + inbound 許可無し」の踏み台にローカル PC からポートフォワーディングできるのは、Session Manager が <strong>踏み台への inbound 接続を一切使わない</strong>仕組みだからである。</p>
+
+      <h3 id="communication-details">通信の実体</h3>
+
+      <p>踏み台 EC2 には <strong>SSM Agent が常駐していて、起動直後から AWS の SSM エンドポイントへ outbound で TLS 接続を張りっぱなし</strong>にしている。ポートフォワーディングは、この既存の outbound トンネル上にデータを流しているだけ。</p>
+
+<pre class="diagram"><code>ローカル PC                  AWS                        Bastion EC2 (private subnet)
+                               │                          │
+                               │  SSM Agent が起動時から   │
+                               │  outbound で張り続ける    │
+                               │  ←──────────────────────│  (ssm / ssmmessages / ec2messages)
+                               │                          │
+  (1) aws ssm start-session    │                          │
+  ───────────────────────►    │                          │
+                               │  (2) 既存トンネル経由で   │
+                               │  「port-forward 開始」を  │
+                               │  Agent に指示            │
+                               │  ──────────────────────►│
+                               │                          │
+                               │                          │  (3) Agent が RDS:3306 へ
+                               │                          │  outbound で TCP 接続
+                               │                          │  ───────────────────► RDS
+                               │                          │
+  (4) ローカル 13306 ⇄ mysql   │  (5) AWS が中継          │
+  ◄──────────────────────►    │  ◄─────────────────────► │  ⇄ RDS</code></pre>
+
+      <p>ポイント:</p>
+
+      <ol>
+        <li><strong>踏み台への inbound は 0</strong>。ローカルから踏み台へ直接 TCP 接続することは一度も無い。だから踏み台 SG の ingress は空でよい。</li>
+        <li><strong>踏み台の AWS への outbound があれば成立する</strong>。このプロジェクトでは <code>NAT Gateway → インターネット → ssm.ap-northeast-1.amazonaws.com</code> 等に出ていく経路で届いている。</li>
+        <li><strong>パブリック IP も IGW へのルートも不要</strong>。プライベートサブネットのままで良い（むしろパブリックに置くと晒すリスクが増えて損）。</li>
+      </ol>
+
+      <h3 id="three-options">プライベートサブネットで動かすための 3 つの選択肢</h3>
+
+      <p>踏み台の outbound が AWS SSM に届く経路さえあれば、どれでも動く。</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>方式</th>
+              <th>月額の目安</th>
+              <th>備考</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>NAT Gateway</strong></td><td>~$32/月（本プロジェクトで採用）</td><td>Lambda も共用している既存資産</td></tr>
+            <tr><td><strong>VPC Interface Endpoint</strong> (<code>ssm</code> / <code>ssmmessages</code> / <code>ec2messages</code>)</td><td>~$21/月（3 × ~$7.2）</td><td>インターネットを通らない。Lambda が外部 API を使わないなら NAT 廃止でさらに削減可能</td></tr>
+            <tr><td>パブリックサブネット + パブリック IP</td><td>$0（但しセキュリティ的に非推奨）</td><td>踏み台が直接インターネットから見える面を持ってしまう</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="ssm-agent-check">SSM Agent が AWS と繋がっているかの確認</h3>
+
+      <p>コンソールで Systems Manager → 「フリートマネージャー」を開き、踏み台が一覧に表示されていれば outbound トンネルが正常に張れている。表示されない場合は、NAT Gateway の状態、踏み台のルートテーブル、SG の egress、IAM ロール（<code>AmazonSSMManagedInstanceCore</code>）を順に確認する。</p>
+
+      <hr>
+
+      <h2 id="prerequisites">1. 前提</h2>
+
+      <h3 id="local-install">ローカル PC にインストールしておくもの</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ツール</th>
+              <th>用途</th>
+              <th>インストール</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>AWS CLI v2</td><td><code>aws ssm start-session</code> 実行</td><td><a href="https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html">公式ガイド</a></td></tr>
+            <tr><td>Session Manager plugin</td><td><code>start-session</code> の実体</td><td><a href="https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html">公式ガイド</a></td></tr>
+            <tr><td>MySQL クライアント</td><td><code>mysql</code> コマンド</td><td>macOS: <code>brew install mysql-client</code> / Ubuntu: <code>sudo apt install mysql-client</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Session Manager plugin が入っているかは以下で確認できる。</p>
+
+<pre><code class="language-bash">session-manager-plugin --version</code></pre>
+
+      <h3 id="aws-cli-credentials">AWS CLI の認証情報について</h3>
+
+      <p><code>aws ssm start-session</code> は裏で AWS API を叩くため、<strong>ローカルに AWS CLI の認証情報が必須</strong>。  ブラウザでコンソールにログインしているだけでは CLI からは使えない。</p>
+
+      <p>このプロジェクトでは <strong>AWS IAM Identity Center (旧 AWS SSO)</strong> を利用しているため、<code>aws sso login</code> で一時クレデンシャルを取得する。</p>
+
+      <h4 id="setup-sso-profile">初回のみ: SSO プロファイルを設定</h4>
+
+      <p><code>~/.aws/config</code> に SSO プロファイルを作る。以下を対話式で設定してくれる。</p>
+
+<pre><code class="language-bash">aws configure sso</code></pre>
+
+      <p>プロンプトで聞かれるもの（例）:</p>
+
+<pre class="diagram"><code>SSO session name:        my-sso
+SSO start URL:           https://&lt;your-org&gt;.awsapps.com/start
+SSO region:              ap-northeast-1
+SSO registration scopes: sso:account:access</code></pre>
+
+      <p>ブラウザが開き、Identity Center にサインイン → アカウントとロールを選択 → プロファイル名（例: <code>practice-stg</code>）を決めて保存する。</p>
+
+      <p><code>~/.aws/config</code> に下記のようなエントリが追加される:</p>
+
+<pre><code class="language-ini">[profile practice-stg]
+sso_session          = my-sso
+sso_account_id       = 123456789012
+sso_role_name        = DeveloperAccess
+region               = ap-northeast-1
+output               = json
+
+[sso-session my-sso]
+sso_start_url        = https://&lt;your-org&gt;.awsapps.com/start
+sso_region           = ap-northeast-1
+sso_registration_scopes = sso:account:access</code></pre>
+
+      <h4 id="sso-login-each-time">毎回の作業前: <code>aws sso login</code></h4>
+
+      <p>SSO の一時クレデンシャルは 8〜12 時間程度で期限切れになる。作業前に以下を実行。</p>
+
+<pre><code class="language-bash">aws sso login --profile practice-stg</code></pre>
+
+      <p>ブラウザが開いて承認画面が出る → 「Confirm and continue」→ ターミナルに戻り <code>Successfully logged into Start URL</code> と出れば OK。</p>
+
+      <p>認証できているかは以下で確認。</p>
+
+<pre><code class="language-bash">aws sts get-caller-identity --profile practice-stg
+# Account, UserId, Arn が表示されればログイン済み</code></pre>
+
+      <p>以降のコマンドは下記の環境変数を設定している前提で書く。</p>
+
+<pre><code class="language-bash">export AWS_PROFILE=practice-stg
+export AWS_REGION=ap-northeast-1</code></pre>
+
+      <h3 id="aws-permissions">AWS 側の権限</h3>
+
+      <p>ログインした SSO ロール（上記例では <code>DeveloperAccess</code>）に以下が必要。</p>
+
+      <ul>
+        <li><code>ssm:StartSession</code>（対象の EC2 に対して）</li>
+        <li><code>ssm:TerminateSession</code>（自分のセッションに対して）</li>
+      </ul>
+
+      <p>通常の開発者ロール（<code>DeveloperAccess</code> / <code>PowerUserAccess</code> など）には既に含まれていることが多い。含まれていない場合は Identity Center 側で PermissionSet を調整する。</p>
+
+      <hr>
+
+      <h2 id="get-values">2. 必要な値を AWS コンソールから取得</h2>
+
+      <p>ブラウザで AWS コンソールにログインして、以下 3 つをメモしておく。CLI でも取れるが、コンソールの方が早い。</p>
+
+      <h3 id="bastion-instance-id">a. 踏み台のインスタンス ID</h3>
+
+      <ol>
+        <li>EC2 → 「インスタンス」</li>
+        <li>名前が <code>&lt;project_name&gt;-bastion</code> のインスタンスを探す</li>
+        <li>詳細ペインの「インスタンス ID」（<code>i-xxxxxxxxxxxxxxxxx</code>）をコピー</li>
+        <li>「インスタンスの状態」が <strong>実行中 (running)</strong> であることを確認</li>
+      </ol>
+
+      <h3 id="rds-endpoint">b. RDS のエンドポイント</h3>
+
+      <ol>
+        <li>RDS → 「データベース」</li>
+        <li>DB 識別子が <code>&lt;project_name&gt;-db</code> のインスタンスをクリック</li>
+        <li>「接続とセキュリティ」タブ → 「エンドポイント」をコピー
+          <ul>
+            <li>例: <code>practice-stg-db.xxxxxxxxxxxx.ap-northeast-1.rds.amazonaws.com</code></li>
+          </ul>
+        </li>
+      </ol>
+
+      <h3 id="db-master-password">c. DB マスターパスワード</h3>
+
+      <p><strong>Secrets Manager から取得する</strong>（Parameter Store ではない）。</p>
+
+      <ol>
+        <li>AWS Secrets Manager → 「シークレット」</li>
+        <li><code>&lt;project_name&gt;/rds-credentials</code> を開く（例: <code>practice-stg/rds-credentials</code>）</li>
+        <li>「シークレットの値を取得する」をクリック</li>
+        <li>JSON が表示されるので <code>password</code> の値をコピー
+<pre><code class="language-json">{
+  "username": "admin",
+  "password": "xxxxxxxxxxxxxxxxxxxxxxxxx"
+}</code></pre>
+        </li>
+      </ol>
+
+      <blockquote>
+        <p><strong>なぜ Parameter Store ではなく Secrets Manager なのか</strong>: このプロジェクトは RDS Proxy 用の認証情報を Secrets Manager に置いており、さらに 30 日ごとの自動パスワードローテーションを有効にしている（<code>secrets_manager.tf</code> / <code>docs/secrets-manager-guide.md</code>）。ローテーション Lambda は <strong>Secrets Manager と RDS の実パスワードだけを更新し、SSM Parameter Store は初期値のまま取り残される</strong>。そのため Parameter Store の値を使っても <code>Access denied for user</code> になる。RDS Proxy 経由の Lambda が参照するのと同じ Secrets Manager を参照するのが唯一正しい取得先。</p>
+      </blockquote>
+
+      <blockquote>
+        <p><strong>注意</strong>: パスワードをシェル履歴に残さないこと。後述のコマンドではプロンプトに貼り付けるだけなので履歴には残らない。</p>
+      </blockquote>
+
+      <hr>
+
+      <h2 id="one-terminal-flow">3. 1 つのターミナルで接続から SQL 実行まで行う</h2>
+
+      <p>Session Manager のポートフォワーディングは前景プロセスとして張りっぱなしにするため、「素朴にやると」ポートフォワーディング用と <code>mysql</code> 用で <strong>ターミナルを 2 つ開く必要がある</strong>。</p>
+
+      <p>しかし、<code>start-session</code> をバックグラウンドで起動し、終了時に一緒に片付ける wrapper を書けば 1 ターミナルで完結できる。<strong>推奨はこちら</strong>。</p>
+
+      <h3 id="oneliner">ワンライナー（そのままコピペで使える）</h3>
+
+      <p>2. で取得した値を 4 箇所の <code>&lt;...&gt;</code> に埋めて実行する。</p>
+
+<pre><code class="language-bash">INSTANCE_ID=&lt;i-xxxxxxxxxxxxxxxxx&gt;   RDS_ENDPOINT=&lt;practice-stg-db.xxxxx.ap-northeast-1.rds.amazonaws.com&gt;   DB_USER=&lt;db_username&gt;   bash -c '
+    aws ssm start-session \
+      --target "$INSTANCE_ID" \
+      --document-name AWS-StartPortForwardingSessionToRemoteHost \
+      --parameters "host=$RDS_ENDPOINT,portNumber=3306,localPortNumber=13306" \
+      &gt;/tmp/ssm.log 2&gt;&amp;1 &amp;
+    SSM_PID=$!
+    trap "kill $SSM_PID 2&gt;/dev/null" EXIT
+
+    until grep -q "Waiting for connections" /tmp/ssm.log 2&gt;/dev/null; do
+      sleep 1
+      kill -0 $SSM_PID 2&gt;/dev/null || { echo "port-forward failed:"; cat /tmp/ssm.log; exit 1; }
+    done
+
+    mysql -h 127.0.0.1 -P 13306 -u "$DB_USER" -p
+  '</code></pre>
+
+      <p>流れ:</p>
+
+      <ol>
+        <li><code>aws ssm start-session</code> をバックグラウンドで起動</li>
+        <li><code>trap "kill $SSM_PID" EXIT</code> で、このブロックが終わる時に必ずポートフォワーディングを止める</li>
+        <li>ログに <code>Waiting for connections</code> が出るまで最大数秒待つ（準備完了の合図）</li>
+        <li><code>mysql</code> を前景で起動、パスワードプロンプトに 2.c のパスワードを貼る</li>
+        <li><code>mysql</code> を <code>exit</code> で抜けると、<code>trap</code> が発動してポートフォワーディングも自動で終了</li>
+      </ol>
+
+      <h4 id="trap-mechanism"><code>trap "kill $SSM_PID" EXIT</code> の仕組み</h4>
+
+      <p><code>trap</code> は bash の組み込みコマンドで、<strong>指定したシグナルを受け取ったときに実行するコマンドを事前に登録しておく</strong>ための機能。</p>
+
+      <h5 id="trap-syntax">構文</h5>
+
+<pre><code class="language-bash">trap  COMMAND  SIGNAL [SIGNAL ...]
+#     ^^^^^^^  ^^^^^^^^^^^^^^^^^^^^
+#     実行する  受け取るシグナル(複数可)</code></pre>
+
+      <ul>
+        <li><code>COMMAND</code> は <strong>1 つの引数として渡す</strong> 必要があるため、スペースを含む場合は必ずクォートで囲む。</li>
+        <li><code>SIGNAL</code> は名前 (<code>INT</code>, <code>TERM</code>) でも番号 (<code>2</code>, <code>15</code>) でも、<code>SIG</code> プレフィックス付き (<code>SIGINT</code>) でも指定できる。</li>
+        <li>複数シグナルを列挙するとそれら全てに対して同じコマンドが登録される。</li>
+      </ul>
+
+      <p>よく使う書き方:</p>
+
+<pre><code class="language-bash"># 1 つのシグナルだけ捕まえる
+trap "echo bye" EXIT
+
+# 複数まとめて登録
+trap "cleanup" INT TERM HUP EXIT
+
+# Ctrl+C を無視する（空文字列 = 「何もしない」ハンドラ）
+trap "" INT
+
+# 登録を解除して元に戻す
+trap - INT</code></pre>
+
+      <p>注意: クォートを忘れるとコマンドの途中までが <code>COMMAND</code>、残りが <code>SIGNAL</code> として解釈されて壊れる。</p>
+
+<pre><code class="language-bash"># ✅ 正しい（"kill $SSM_PID 2&gt;/dev/null" が 1 引数として渡る）
+trap "kill $SSM_PID 2&gt;/dev/null" EXIT
+
+# ❌ 間違い（kill がコマンド、$SSM_PID 以降がシグナル扱いになる）
+trap kill $SSM_PID EXIT</code></pre>
+
+      <p><code>EXIT</code> と <code>ERR</code> は bash 独自の擬似シグナルで、OS シグナルとしては存在しない（シェルが内部でハンドリングする）。</p>
+
+<pre><code class="language-bash">SSM_PID=$!                                # 直前にバックグラウンド起動した aws ssm のプロセス ID を取得
+trap "kill $SSM_PID 2&gt;/dev/null" EXIT     # シェル(またはサブシェル)が終了する瞬間に kill $SSM_PID を実行</code></pre>
+
+      <p>各部品の役割:</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>要素</th>
+              <th>意味</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>$!</code></td><td>直前に <code>&amp;</code> でバックグラウンド起動したプロセスの PID を取得する特殊変数</td></tr>
+            <tr><td><code>SSM_PID=$!</code></td><td>その PID を変数に保存しておく（後から <code>kill</code> に渡すため）</td></tr>
+            <tr><td><code>EXIT</code></td><td>bash の特殊な「擬似シグナル」。<strong>シェル/スクリプトがどんな理由で終わっても</strong> 発火する</td></tr>
+            <tr><td><code>kill $SSM_PID</code></td><td>保存した PID に SIGTERM（デフォルト）を送って終了させる</td></tr>
+            <tr><td><code>2&gt;/dev/null</code></td><td>プロセスが既に死んでいた場合の <code>kill: No such process</code> エラーを握り潰す</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><strong><code>EXIT</code> 擬似シグナルは具体的に以下を全て拾う:</strong></p>
+
+      <ul>
+        <li>スクリプトが最後まで走りきって正常終了 (<code>exit 0</code>)</li>
+        <li><code>set -e</code> で途中の失敗により異常終了 (<code>exit 1</code>)</li>
+        <li>ユーザーが Ctrl+C を押した（SIGINT）</li>
+        <li>ターミナルを閉じた（SIGHUP）</li>
+        <li><code>kill &lt;script_pid&gt;</code> で外部から止められた（SIGTERM）</li>
+        <li><code>return</code> でサブシェルを抜けた</li>
+      </ul>
+
+      <p><strong>拾えない唯一の例外が <code>SIGKILL</code> (<code>kill -9</code>)。</strong> SIGKILL はプロセスに通知せず即座に OS が殺すため、trap ハンドラを走らせる猶予がない。</p>
+
+      <p><strong>なぜこれが必要か:</strong></p>
+
+      <p><code>aws ssm start-session ... &amp;</code> で起動したプロセスはシェルと独立して動く。もし trap を入れずに Ctrl+C で抜けると、親シェルだけが死んで SSM プロセスは<strong>孤児（orphan）として残り続ける</strong>。結果:</p>
+
+      <ul>
+        <li>ローカルの 13306 ポートが掴まれたままで次回の接続が失敗する</li>
+        <li><code>ps aux | grep ssm</code> に古いセッションが溜まっていく</li>
+        <li>AWS 側のセッション枠も消費し続ける</li>
+      </ul>
+
+      <p>trap で <code>EXIT</code> にクリーンアップを登録しておけば、<strong>正常終了・異常終了・割り込み、どの経路で抜けても必ず <code>kill $SSM_PID</code> が実行される</strong>。他言語の try/finally や Go の <code>defer</code>, C++ の RAII と同じ「後始末保証」のパターン。</p>
+
+      <p><strong>動作イメージ:</strong></p>
+
+<pre class="diagram"><code>[シェル起動]
+   │
+   ├─ aws ssm ... &amp;        ← バックグラウンド起動 (PID=12345)
+   ├─ SSM_PID=12345
+   ├─ trap "kill 12345" EXIT  ← ハンドラ登録(まだ発火しない)
+   ├─ mysql ...            ← ユーザーが SQL を叩く
+   │       │
+   │   ユーザー Ctrl+D / exit / Ctrl+C / エラー
+   │       ▼
+   └─ [シェル終了直前] trap EXIT が発火 → kill 12345 が走る
+                                          ↓
+                                     SSM プロセス停止</code></pre>
+
+      <p>接続後は普通に SQL を叩ける。</p>
+
+<pre><code class="language-sql">SHOW DATABASES;
+USE &lt;db_name&gt;;
+SHOW TABLES;
+SELECT VERSION();</code></pre>
+
+      <blockquote>
+        <p><strong><code>127.0.0.1</code> を必ず使う</strong>。<code>localhost</code> だと OS によっては Unix ソケット接続を優先してしまい、ポートフォワーディングが使われない。</p>
+      </blockquote>
+
+      <h3 id="save-as-script">スクリプトとして保存したい場合</h3>
+
+      <p>頻繁に使うなら <code>~/bin/db-connect.sh</code> のように保存しておくと楽。</p>
+
+<pre><code class="language-bash">#!/usr/bin/env bash
+set -euo pipefail
+
+: "${AWS_PROFILE:=practice-stg}"
+export AWS_PROFILE
+export AWS_REGION=ap-northeast-1
+
+INSTANCE_ID="i-xxxxxxxxxxxxxxxxx"
+RDS_ENDPOINT="practice-stg-db.xxxxx.ap-northeast-1.rds.amazonaws.com"
+DB_USER="admin"
+
+aws ssm start-session \
+  --target "$INSTANCE_ID" \
+  --document-name AWS-StartPortForwardingSessionToRemoteHost \
+  --parameters "host=$RDS_ENDPOINT,portNumber=3306,localPortNumber=13306" \
+  &gt;/tmp/ssm.log 2&gt;&amp;1 &amp;
+SSM_PID=$!
+trap "kill $SSM_PID 2&gt;/dev/null || true" EXIT
+
+until grep -q "Waiting for connections" /tmp/ssm.log 2&gt;/dev/null; do
+  sleep 1
+  kill -0 $SSM_PID 2&gt;/dev/null || { echo "port-forward failed:"; cat /tmp/ssm.log; exit 1; }
+done
+
+exec mysql -h 127.0.0.1 -P 13306 -u "$DB_USER" -p</code></pre>
+
+<pre><code class="language-bash">chmod +x ~/bin/db-connect.sh
+~/bin/db-connect.sh   # パスワードプロンプトが出る</code></pre>
+
+      <hr>
+
+      <h2 id="two-terminal-flow">4. 2 ターミナルに分ける方法（代替）</h2>
+
+      <p>ワンライナーを使わず素朴にやる場合はターミナルを 2 つ使う。デバッグ時はこちらの方がポートフォワーディングのログが見えて楽。</p>
+
+      <h3 id="terminal-a">ターミナル A: ポートフォワーディング</h3>
+
+<pre><code class="language-bash">aws ssm start-session \
+  --target &lt;i-xxxxxxxxxxxxxxxxx&gt; \
+  --document-name AWS-StartPortForwardingSessionToRemoteHost \
+  --parameters "host=&lt;practice-stg-db.xxxxx.ap-northeast-1.rds.amazonaws.com&gt;,portNumber=3306,localPortNumber=13306"</code></pre>
+
+<pre class="diagram"><code>Starting session with SessionId: xxxxx
+Port 13306 opened for sessionId xxxxx.
+Waiting for connections...</code></pre>
+
+      <p>と出たらそのまま放置。</p>
+
+      <h3 id="terminal-b">ターミナル B: mysql 接続</h3>
+
+<pre><code class="language-bash">mysql -h 127.0.0.1 -P 13306 -u &lt;db_username&gt; -p</code></pre>
+
+      <p>作業が終わったら <code>mysql</code> を <code>exit</code> で抜け、ターミナル A を <strong>Ctrl+C</strong> で止める。</p>
+
+      <hr>
+
+      <h2 id="troubleshooting">5. よくあるエラーと対処</h2>
+
+      <h3 id="expired-token"><code>Unable to locate credentials</code> / <code>ExpiredToken</code></h3>
+
+      <ul>
+        <li>SSO のトークンが切れている。</li>
+        <li>対処: <code>aws sso login --profile practice-stg</code> をもう一度実行。</li>
+      </ul>
+
+      <h3 id="target-not-connected"><code>TargetNotConnected</code></h3>
+
+<pre class="diagram"><code>An error occurred (TargetNotConnected) when calling the StartSession operation</code></pre>
+
+      <ul>
+        <li>踏み台が停止している、もしくは SSM Agent が AWS に繋がっていない。</li>
+        <li>対処:
+          <ol>
+            <li>コンソールで踏み台が「実行中」か確認</li>
+            <li>コンソールで Systems Manager → 「フリートマネージャー」で対象インスタンスが表示されているか確認</li>
+            <li>NAT Gateway が動いているか、踏み台のサブネットから NAT へのルートがあるか確認</li>
+            <li>踏み台 SG の egress が全許可になっているか確認</li>
+          </ol>
+        </li>
+      </ul>
+
+      <h3 id="access-denied"><code>AccessDeniedException</code> / <code>is not authorized to perform: ssm:StartSession</code></h3>
+
+      <ul>
+        <li>ログインしている SSO ロールに <code>ssm:StartSession</code> 権限が無い。</li>
+        <li>対処: Identity Center の PermissionSet を調整、もしくは適切なロールで <code>aws sso login</code> し直す。</li>
+      </ul>
+
+      <h3 id="cant-connect-mysql"><code>ERROR 2003 (HY000): Can't connect to MySQL server on '127.0.0.1:13306'</code></h3>
+
+      <ul>
+        <li>ポートフォワーディングがまだ起動しきっていない / 落ちている。</li>
+        <li>対処: <code>/tmp/ssm.log</code>（ワンライナーの場合）か ターミナル A の表示を確認。<code>Port 13306 opened</code> が出ていれば接続可能状態。</li>
+      </ul>
+
+      <h3 id="access-denied-user"><code>ERROR 1045 (28000): Access denied for user</code></h3>
+
+      <ul>
+        <li>パスワードが間違っている、もしくはユーザ名が違う。</li>
+        <li>対処: <strong>Secrets Manager の <code>&lt;project_name&gt;/rds-credentials</code></strong> から最新のパスワードを再コピー（Parameter Store の値はローテーション後に古くなっているので使わない）。ユーザ名は同じシークレット内の <code>username</code> フィールドを確認する。</li>
+      </ul>
+
+      <h3 id="quick-disconnect">接続するがすぐ切れる</h3>
+
+      <ul>
+        <li>Session Manager のアイドルタイムアウト（デフォルト 20 分）で自動切断される。</li>
+        <li>対処: 長時間作業するなら <code>mysql</code> 内で <code>SELECT 1;</code> を定期的に叩く、もしくは <code>mysql</code> の <code>--wait</code> オプションを使う。</li>
+      </ul>
+
+      <hr>
+
+      <h2 id="rds-proxy-forward">6. 補足: RDS Proxy に転送したい場合</h2>
+
+      <p>現状は RDS に直接転送する設計だが、RDS Proxy の挙動を確認したい場合は以下で対応できる。</p>
+
+      <ol>
+        <li><code>security_groups.tf</code> の <code>rds_proxy_sg</code> に bastion_sg からの ingress を追加（3306/tcp）</li>
+        <li><code>start-session</code> の <code>host</code> を RDS Proxy のエンドポイントに変更（コンソールの RDS → 「プロキシ」から取得）</li>
+        <li>Proxy は IAM 認証 + TLS 必須。<code>mysql</code> コマンドの引数が変わる。
+<pre><code class="language-bash">TOKEN=$(aws rds generate-db-auth-token \
+  --hostname &lt;proxy-endpoint&gt; \
+  --port 3306 \
+  --username &lt;db_username&gt;)
+
+mysql -h 127.0.0.1 -P 13306 -u &lt;db_username&gt; \
+  --password="$TOKEN" \
+  --enable-cleartext-plugin \
+  --ssl-mode=REQUIRED</code></pre>
+        </li>
+      </ol>
+
+      <p>ローカルから Proxy を使うのは手間が多いので、<strong>特別な理由が無ければ RDS 直接接続で十分</strong>。</p>
+
+      <hr>
+
+      <h2 id="related-docs">関連ドキュメント</h2>
+
+      <ul>
+        <li><code>docs/rds-proxy-iam-auth-guide.md</code> — RDS Proxy の IAM 認証の詳細</li>
+        <li><code>docs/secrets-manager-guide.md</code> — パスワードローテーションの仕組み</li>
+      </ul>
+    </main>
+  </div>
+
+  <!-- Prism.js (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+</body>
+</html>

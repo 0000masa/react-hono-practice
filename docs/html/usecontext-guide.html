@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>useContext ガイド</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" media="(prefers-color-scheme: light)">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" media="(prefers-color-scheme: dark)">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <h2>このページ</h2>
+      <ul>
+        <li><a href="#what-it-solves">useContext で何を解決しているか</a></li>
+        <li><a href="#file-diagram">5ファイルの関係図</a></li>
+        <li>
+          <a href="#file-roles">各ファイルの役割</a>
+          <ul>
+            <li><a href="#auth-client" class="toc-h3">1. auth-client.ts</a></li>
+            <li><a href="#auth-context-types" class="toc-h3">2. authContext.types.ts</a></li>
+            <li><a href="#auth-context-tsx" class="toc-h3">3. AuthContext.tsx</a></li>
+            <li><a href="#app-tsx" class="toc-h3">4. App.tsx</a></li>
+            <li><a href="#use-auth" class="toc-h3">5. useAuth.ts</a></li>
+          </ul>
+        </li>
+        <li><a href="#flow-summary">流れのまとめ</a></li>
+      </ul>
+    </aside>
+
+    <main class="content">
+      <nav class="breadcrumb" aria-label="breadcrumb">
+        <a href="../../README.md">プロジェクト</a>
+        <span class="breadcrumb-sep">/</span>
+        <span>docs</span>
+        <span class="breadcrumb-sep">/</span>
+        <span>usecontext-guide</span>
+      </nav>
+
+      <h1>useContext ガイド</h1>
+
+      <h2 id="what-it-solves">useContext で何を解決しているか</h2>
+
+      <p>useContext がないと、深い階層のコンポーネントにデータを渡すには<strong>バケツリレー(props drilling)</strong>が必要になる。</p>
+
+<pre class="diagram"><code>App → Dashboard → Header → UserMenu → user を表示
+       ↑ user を props で渡す → ↑ さらに渡す → ↑ さらに渡す</code></pre>
+
+      <p>useContext を使うと、<strong>途中を飛ばして直接アクセス</strong>できる。</p>
+
+<pre class="diagram"><code>App(Providerで user をセット)
+  └─ Dashboard
+       └─ Header
+            └─ UserMenu ← useAuth() で直接 user を取得</code></pre>
+
+      <h2 id="file-diagram">5ファイルの関係図</h2>
+
+<pre class="diagram"><code>auth-client.ts           ← BetterAuth クライアント作成
+       ↓
+authContext.types.ts     ← 型定義とContext作成
+       ↓
+AuthContext.tsx           ← auth-client を使って値をセットする Provider
+       ↓
+App.tsx                   ← Providerでアプリ全体を囲む
+       ↓
+useAuth.ts                ← Contextから値を取り出すカスタムフック
+       ↓
+各ページコンポーネント     ← useAuth() で user や logout を使う</code></pre>
+
+      <h2 id="file-roles">各ファイルの役割</h2>
+
+      <h3 id="auth-client">1. <code>auth-client.ts</code> — BetterAuth クライアントを作る</h3>
+
+<pre><code class="language-typescript">import { createAuthClient } from 'better-auth/react';
+
+const baseURL = import.meta.env.VITE_API_BASE_URL;
+
+export const authClient = createAuthClient({
+  baseURL: baseURL ? baseURL.replace(/\/api$/, '') : '',
+  basePath: '/api/auth',
+});</code></pre>
+
+      <p><code>authClient</code> はバックエンドの BetterAuth API と通信するためのクライアント。セッション取得 (<code>getSession</code>)、ログアウト (<code>signOut</code>)、Google ログイン (<code>signIn.social</code>) などのメソッドを提供する。</p>
+
+      <h3 id="auth-context-types">2. <code>authContext.types.ts</code> — 箱を作る</h3>
+
+<pre><code class="language-typescript">export interface AuthContextType {
+  user: User | null;
+  isLoading: boolean;
+  logout: () =&gt; Promise&lt;void&gt;;
+}
+
+// 「認証情報を入れる箱」を作る(中身はまだ空)
+export const AuthContext = createContext&lt;AuthContextType | undefined&gt;(undefined);</code></pre>
+
+      <p><code>createContext</code> は<strong>グローバルな入れ物(箱)</strong>を作る。この時点では中身は <code>undefined</code>。</p>
+
+      <h3 id="auth-context-tsx">3. <code>AuthContext.tsx</code> — 箱に中身を入れる</h3>
+
+<pre><code class="language-typescript">export const AuthProvider: React.FC&lt;{ children: ReactNode }&gt; = ({ children }) =&gt; {
+  const [user, setUser] = useState&lt;User | null&gt;(null);
+  const [isLoading, setIsLoading] = useState&lt;boolean&gt;(true);
+
+  useEffect(() =&gt; {
+    const checkSession = async () =&gt; {
+      const { data: session } = await authClient.getSession();
+      if (session?.user) {
+        setUser({
+          id: Number(session.user.id),
+          name: session.user.name,
+          email: session.user.email,
+          avatar_url: session.user.image ?? null,
+        });
+      }
+      setIsLoading(false);
+    };
+    checkSession();
+  }, []);
+
+  const logout = async () =&gt; {
+    await authClient.signOut();
+    setUser(null);
+  };
+
+  return (
+    // AuthContext.Provider で箱に値を入れる
+    &lt;AuthContext.Provider value={{ user, isLoading, logout }}&gt;
+      {children}  {/* ← 子コンポーネント全てがこの値にアクセスできる */}
+    &lt;/AuthContext.Provider&gt;
+  );
+};</code></pre>
+
+      <p><code>Provider</code> が<strong>箱に中身(value)を入れる役割</strong>。マウント時に <code>authClient.getSession()</code> でセッションを確認し、ユーザー情報を Context にセットする。</p>
+
+      <h3 id="app-tsx">4. <code>App.tsx</code> — Provider でアプリを囲む</h3>
+
+<pre><code class="language-typescript">function App() {
+  return (
+    &lt;BrowserRouter&gt;
+      &lt;AuthProvider&gt;       {/* ← ここで囲んだ範囲の子孫が値にアクセスできる */}
+        &lt;Routes&gt;
+          &lt;Route path="/login" element={&lt;Login /&gt;} /&gt;
+          &lt;Route path="/dashboard" element={
+            &lt;ProtectedRoute&gt;&lt;Dashboard /&gt;&lt;/ProtectedRoute&gt;
+          } /&gt;
+          &lt;Route path="/auth/callback" element={&lt;Callback /&gt;} /&gt;
+          ...
+        &lt;/Routes&gt;
+      &lt;/AuthProvider&gt;
+    &lt;/BrowserRouter&gt;
+  );
+}</code></pre>
+
+      <p><code>AuthProvider</code> の内側にある全コンポーネントが認証情報にアクセスできる。</p>
+
+      <h3 id="use-auth">5. <code>useAuth.ts</code> — 箱から中身を取り出す</h3>
+
+<pre><code class="language-typescript">export const useAuth = () =&gt; {
+  // useContext で AuthContext(箱)から中身を取り出す
+  const context = useContext(AuthContext);
+
+  // Provider の外で使われた場合は undefined になるのでエラーにする
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+
+  return context;  // { user, isLoading, logout }
+};</code></pre>
+
+      <p>各ページではこう使う:</p>
+
+<pre><code class="language-typescript">const { user, logout } = useAuth();
+// → user.name でユーザー名を表示
+// → logout() でログアウト実行</code></pre>
+
+      <p><code>useAuth</code> でラップしている理由は、毎回 <code>useContext(AuthContext)</code> と書く手間を省くのと、Provider の外で誤って使った場合にエラーを出すため。</p>
+
+      <p>なお、ログイン処理は <code>authClient.signIn.social({ provider: 'google' })</code> を直接呼ぶため Context には含まれていない(Login ページでのみ使用)。</p>
+
+      <h2 id="flow-summary">流れのまとめ</h2>
+
+<pre class="diagram"><code>1. createAuthClient()     → BetterAuth クライアントを作る(バックエンドとの通信用)
+2. createContext()         → 空の箱を作る
+3. Provider value={...}    → authClient でセッションを取得し、箱に値を入れる
+4. App で Provider で囲む   → どの範囲のコンポーネントがアクセスできるか決める
+5. useContext()            → 箱から値を取り出す(useAuth でラップ)</code></pre>
+    </main>
+  </div>
+
+  <!-- Prism.js (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+</body>
+</html>
