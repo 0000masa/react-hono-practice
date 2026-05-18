@@ -1,6 +1,6 @@
 project_name             = "practice-stg"
 domain_name              = "mylabinfra.com"
-sub_frontend_domain_name = "www"
+sub_frontend_domain_name = "stg.www"
 db_name                  = "practice_db"
 db_username              = "admin"
 parameter_store_path     = "/practice/stg/"
