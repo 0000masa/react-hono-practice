@@ -70,11 +70,14 @@ resource "aws_iam_policy" "github_actions_lambda_update" {
         Resource = data.aws_ecr_repository.backend.arn
       },
       {
+        # `aws lambda wait function-updated` は GetFunctionConfiguration をポーリングして
+        # LastUpdateStatus を確認する。UpdateFunctionCode / GetFunction とは別アクションのため明示。
         Sid    = "LambdaUpdate"
         Effect = "Allow"
         Action = [
           "lambda:UpdateFunctionCode",
           "lambda:GetFunction",
+          "lambda:GetFunctionConfiguration",
         ]
         Resource = [
           aws_lambda_function.api.arn,
