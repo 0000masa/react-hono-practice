@@ -33,7 +33,7 @@ jobs:
       #  AWS 認証 (OIDC ロール)
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_S3_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_FRONTEND_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       # SSMから最新のIDを取得して環境変数に入れる

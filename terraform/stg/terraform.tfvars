@@ -20,3 +20,7 @@ rds_apply_immediately               = true
 rds_enabled_cloudwatch_logs_exports = ["error"]
 rds_performance_insights_enabled    = false
 rds_monitoring_interval             = 0
+
+# --- GitHub Actions OIDC ---
+github_repository               = "0000masa/react-hono-practice"
+github_actions_allowed_branches = ["main", "develop"]
