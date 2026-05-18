@@ -10,6 +10,12 @@ resource "aws_lambda_function" "api" {
   memory_size   = 1024
   timeout       = 29 # API Gateway の最大タイムアウトは 30 秒
 
+  # cloudwatch.tf の共有ロググループに書き込ませる (subscription filter で一括監視するため)
+  logging_config {
+    log_format = "Text"
+    log_group  = aws_cloudwatch_log_group.app_log.name
+  }
+
   image_config {
     command = ["lambda.handler"]
   }
@@ -62,6 +68,11 @@ resource "aws_lambda_function" "sqs_worker" {
   image_uri     = local.lambda_image_uri
   memory_size   = 1024
   timeout       = 60 # SQS visibility_timeout (90s) より短くする
+
+  logging_config {
+    log_format = "Text"
+    log_group  = aws_cloudwatch_log_group.app_log.name
+  }
 
   image_config {
     command = ["sqs-handler.handler"]
@@ -123,6 +134,11 @@ resource "aws_lambda_function" "db_task" {
   memory_size   = 512
   timeout       = 900 # 最大 15 分
 
+  logging_config {
+    log_format = "Text"
+    log_group  = aws_cloudwatch_log_group.app_log.name
+  }
+
   image_config {
     command = ["db-task.handler"]
   }
@@ -164,6 +180,11 @@ resource "aws_lambda_function" "daily_report" {
   image_uri     = local.lambda_image_uri
   memory_size   = 512
   timeout       = 300
+
+  logging_config {
+    log_format = "Text"
+    log_group  = aws_cloudwatch_log_group.app_log.name
+  }
 
   image_config {
     command = ["daily-report.handler"]
@@ -243,6 +264,13 @@ resource "aws_lambda_function" "notification_function" {
   memory_size   = 256
   timeout       = 30
 
+  # 共有ロググループには書かない (自分が出すエラーが subscription filter 経由で
+  # 再度自分を呼び出して無限ループになるのを防ぐため、専用ロググループに分離)
+  logging_config {
+    log_format = "Text"
+    log_group  = aws_cloudwatch_log_group.lambda_notifications_email_log.name
+  }
+
   image_config {
     command = ["notifications-email.handler"]
   }
@@ -300,12 +328,13 @@ resource "aws_lambda_permission" "secrets_manager_rotation" {
 }
 
 # LambdaがCloudWatch Logsから呼び出せるようにする
+# subscription filter が貼られている共有ロググループ (app_log) からの invoke のみ許可する
 resource "aws_lambda_permission" "allow_cloudwatch_logs_invoke" {
   statement_id  = "AllowExecutionFromCloudWatchLogs"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.notification_function.function_name
   principal     = "logs.ap-northeast-1.amazonaws.com"
-  source_arn    = "${aws_cloudwatch_log_group.lambda_api_log.arn}:*"
+  source_arn    = "${aws_cloudwatch_log_group.app_log.arn}:*"
 }
 
 # SQS → Lambda の aws_lambda_permission は不要。

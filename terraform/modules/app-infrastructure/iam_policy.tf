@@ -213,7 +213,7 @@ resource "aws_iam_policy" "lambda_read_hono_logs" {
           "logs:FilterLogEvents"
         ]
         Resource = [
-          "${aws_cloudwatch_log_group.lambda_api_log.arn}:*"
+          "${aws_cloudwatch_log_group.app_log.arn}:*"
         ]
       }
     ]

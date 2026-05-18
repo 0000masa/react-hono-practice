@@ -1,31 +1,23 @@
 # ==============================================================================
 # CloudWatch ロググループ
-# Lambda は実行時に /aws/lambda/{function_name} のロググループへ自動的にログを出力する。
+# Lambda は実行時に /aws/lambda/{function_name} のロググループへ自動的にログを出力するが、
+# lambda.tf 側で logging_config.log_group を指定して書き込み先を統合ロググループに振り替える。
 # 事前に Terraform で作成しておくことで retention_in_days 等の設定を制御する。
-# （事前作成しない場合、Lambda が無期限保持のロググループを自動作成する）
 # ==============================================================================
 
-# API Lambda 用ロググループ
-resource "aws_cloudwatch_log_group" "lambda_api_log" {
-  name              = "/aws/lambda/${var.project_name}-api"
+# アプリケーション 4 Lambda (api / sqs-worker / db-task / daily-report) の共有ロググループ。
+# 1 本の subscription filter でエラー通知を一元的に拾うために統合している。
+# 個別 Lambda は log_stream 名で分かれるので、CloudWatch Logs Insights で @logStream 絞り込み可能。
+resource "aws_cloudwatch_log_group" "app_log" {
+  name              = "/${var.project_name}/lambda"
   retention_in_days = 30
 }
 
-# SQS ワーカー Lambda 用ロググループ
-resource "aws_cloudwatch_log_group" "lambda_sqs_worker_log" {
-  name              = "/aws/lambda/${var.project_name}-sqs-worker"
-  retention_in_days = 30
-}
-
-# DB タスク Lambda 用ロググループ
-resource "aws_cloudwatch_log_group" "lambda_db_task_log" {
-  name              = "/aws/lambda/${var.project_name}-db-task"
-  retention_in_days = 30
-}
-
-# 日次レポート Lambda 用ロググループ
-resource "aws_cloudwatch_log_group" "lambda_daily_report_log" {
-  name              = "/aws/lambda/${var.project_name}-daily-report"
+# notifications-email Lambda 専用ロググループ。
+# このロググループに subscription filter は貼らない (= 通知 Lambda 自身のエラーが自分を
+# 呼び出して無限ループになる事故を防ぐため、共有ロググループと意図的に分離している)。
+resource "aws_cloudwatch_log_group" "lambda_notifications_email_log" {
+  name              = "/aws/lambda/${var.project_name}-notifications-email"
   retention_in_days = 30
 }
 
@@ -33,10 +25,10 @@ resource "aws_cloudwatch_log_group" "lambda_daily_report_log" {
 # CloudWatch ログサブスクリプションフィルター（エラー通知 Lambda へ）
 # ==============================================================================
 
-# API Lambda のエラーログを通知 Lambda に流す
+# アプリケーション 4 Lambda 共有ロググループのエラーログを通知 Lambda に流す
 resource "aws_cloudwatch_log_subscription_filter" "lambda_error_to_notification" {
   name           = "${var.project_name}-lambda-error-to-notification"
-  log_group_name = aws_cloudwatch_log_group.lambda_api_log.name
+  log_group_name = aws_cloudwatch_log_group.app_log.name
 
   # backend/src/utils/logger.ts が出力する統一 JSON ログの level が
   # "ERROR" または "CRITICAL" のものだけを通知 Lambda に流す。
