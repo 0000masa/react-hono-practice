@@ -102,3 +102,19 @@ variable "rds_monitoring_interval" {
     error_message = "monitoring_interval は 0/1/5/10/15/30/60 のいずれかを指定してください。"
   }
 }
+
+variable "github_repository" {
+  description = "GitHub Actions OIDC の sub claim 制限で許可するリポジトリ (<owner>/<repo> 形式)"
+  type        = string
+}
+
+variable "github_actions_allowed_branches" {
+  description = "この環境のデプロイ系ロールが信頼する GitHub ブランチ名のリスト。stg は [\"main\", \"develop\"]、prod は [\"main\"] を想定"
+  type        = list(string)
+}
+
+variable "create_shared_github_actions_roles" {
+  description = "環境共通の GitHub Actions 用ロール (ECR push 等) をこの環境で作成するか。stg 環境のみ true にする"
+  type        = bool
+  default     = false
+}

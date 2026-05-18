@@ -22,6 +22,10 @@ module "app" {
   rds_performance_insights_enabled    = var.rds_performance_insights_enabled
   rds_monitoring_interval             = var.rds_monitoring_interval
 
+  github_repository                  = var.github_repository
+  github_actions_allowed_branches    = var.github_actions_allowed_branches
+  create_shared_github_actions_roles = true
+
   providers = {
     aws           = aws
     aws.us_east_1 = aws.us_east_1

@@ -92,3 +92,13 @@ variable "rds_monitoring_interval" {
   description = "Enhanced Monitoringのメトリクス取得間隔（秒）"
   type        = number
 }
+
+variable "github_repository" {
+  description = "GitHub Actions OIDC の sub claim 制限で許可するリポジトリ (<owner>/<repo> 形式)"
+  type        = string
+}
+
+variable "github_actions_allowed_branches" {
+  description = "stg 環境のデプロイ系ロールが信頼する GitHub ブランチ名のリスト"
+  type        = list(string)
+}
