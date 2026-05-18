@@ -24,6 +24,7 @@ module "app" {
 
   github_repository                  = var.github_repository
   github_actions_allowed_branches    = var.github_actions_allowed_branches
+  github_environment_name            = var.github_environment_name
   create_shared_github_actions_roles = true
 
   providers = {

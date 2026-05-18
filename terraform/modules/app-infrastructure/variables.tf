@@ -113,6 +113,11 @@ variable "github_actions_allowed_branches" {
   type        = list(string)
 }
 
+variable "github_environment_name" {
+  description = "GitHub Actions の environment 名 (workflow の `environment:` に指定する値)。OIDC sub クレームの `repo:OWNER/REPO:environment:<NAME>` 部分に使う。app_env (staging 等) とは別管理。"
+  type        = string
+}
+
 variable "create_shared_github_actions_roles" {
   description = "環境共通の GitHub Actions 用ロール (ECR push 等) をこの環境で作成するか。stg 環境のみ true にする"
   type        = bool

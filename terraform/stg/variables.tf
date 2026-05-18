@@ -102,3 +102,8 @@ variable "github_actions_allowed_branches" {
   description = "stg 環境のデプロイ系ロールが信頼する GitHub ブランチ名のリスト"
   type        = list(string)
 }
+
+variable "github_environment_name" {
+  description = "GitHub Actions の environment 名 (workflow_dispatch の target_env と一致させる)。OIDC sub クレームに使う。"
+  type        = string
+}

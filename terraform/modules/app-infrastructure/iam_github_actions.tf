@@ -16,7 +16,8 @@ locals {
   oidc_sub_any_ref = "${var.github_repository}:*"
 
   # 環境別ロール用: environment 値で sub を固定する完全一致 sub
-  oidc_sub_environment = "${var.github_repository}:environment:${var.app_env}"
+  # GitHub Actions の environment 名 (stg/prod) を使う。app_env (staging 等) ではない点に注意。
+  oidc_sub_environment = "${var.github_repository}:environment:${var.github_environment_name}"
 
   # 環境別ロールが許可する :ref クレームの値 (refs/heads/<branch>)
   github_actions_allowed_refs = [

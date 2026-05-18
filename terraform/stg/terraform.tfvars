@@ -24,3 +24,4 @@ rds_monitoring_interval             = 0
 # --- GitHub Actions OIDC ---
 github_repository               = "0000masa/react-hono-practice"
 github_actions_allowed_branches = ["main", "develop"]
+github_environment_name         = "stg"
