@@ -5,7 +5,10 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc --noEmit && esbuild src/index.ts --bundle --platform=node --outfile=dist/index.js --packages=external",
     "build:lambda": "tsc --noEmit && esbuild src/lambda.ts src/sqs-handler.ts src/db-task.ts src/daily-report.ts src/notifications-email.ts --bundle --platform=node --outdir=dist --target=node22 --external:@aws-sdk/*",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1012.0",
@@ -27,9 +30,12 @@
     "@types/node": "^20.11.17",
     "@types/nodemailer": "^7.0.11",
     "@types/qrcode": "^1.5.6",
+    "@vitest/coverage-v8": "^2.1.9",
+    "aws-sdk-client-mock": "^4.1.0",
     "drizzle-kit": "^0.31.10",
     "esbuild": "^0.27.4",
     "tsx": "^4.7.1",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^2.1.9"
   }
 }
