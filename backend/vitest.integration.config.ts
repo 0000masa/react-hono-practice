@@ -1,22 +1,56 @@
 import { defineConfig } from 'vitest/config';
 
-// Integration / E2E 専用設定。実 DB (mysql-test, port 3307) が必要。
+/**
+ * 結合テスト / E2E テスト専用の Vitest 設定。
+ *
+ * いつ参照されるか:
+ *   - `npm run test:integration` から
+ *     `vitest run --config vitest.integration.config.ts` として明示指定される。
+ *   - デフォルトの `npm test` (vitest.config.ts) からは参照されない。
+ *
+ * 役割:
+ *   - 実 DB (`mysql-test`, host=127.0.0.1, port=3307) を起動した状態で、
+ *     アプリ全体を通すテストを走らせる。
+ *   - DB 状態をテスト間で共有するため、並列実行は無効化して直列で走らせる。
+ */
 export default defineConfig({
   test: {
+    // 結合/E2E 用ディレクトリ配下のみを対象にする。
+    // (ユニットテスト側 vitest.config.ts ではここを exclude している)
     include: [
       'src/__tests__/integration/**/*.test.ts',
       'src/__tests__/e2e/**/*.test.ts',
     ],
+    // Node.js 環境で実行 (DOM は不要)。
     environment: 'node',
+    // 各テストの前にモック呼び出し履歴を自動クリア。
     clearMocks: true,
-    // テスト間で DB を共有するため直列実行
+
+    // --- 並列実行の抑制 -------------------------------------------------
+    // 同じ MySQL を共有する都合上、複数テストが同時にレコードを
+    // 書き換えると不整合が起きる。以下 3 つで「1 プロセス・直列実行」
+    // にしている。
+    //
+    // fileParallelism=false : 複数テストファイルを並列に走らせない
+    // pool='forks'          : ワーカープールに子プロセス (fork) を使う
+    // forks.singleFork=true : その fork も 1 つだけに固定する
     fileParallelism: false,
     pool: 'forks',
     poolOptions: { forks: { singleFork: true } },
-    testTimeout: 30000,
-    hookTimeout: 60000,
+
+    // 実 DB アクセスや起動待ちで時間がかかるためデフォルトより長めに。
+    testTimeout: 30000, // 各 it/test の上限 30 秒
+    hookTimeout: 60000, // beforeAll/afterAll などフックの上限 60 秒
+
+    // 全テスト実行前に 1 回だけ走るセットアップ。
+    // テスト用 MySQL の起動待機 → schema.sql 適用を行う
+    // (src/__tests__/global-setup.ts を参照)。
     globalSetup: ['./src/__tests__/global-setup.ts'],
-    // env.ts の dotenv.config() より先に process.env に注入される
+
+    // テストプロセスに注入する環境変数。
+    // env.ts の dotenv.config() より先に process.env にセットされるため、
+    // 本番用 .env の値を上書きできる。
+    // ここでテスト用 DB / S3 / メール / Auth の接続情報を固定値に倒している。
     env: {
       NODE_ENV: 'test',
       DATABASE_HOST: '127.0.0.1',
