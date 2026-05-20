@@ -777,17 +777,106 @@ console.log('world');              // 復元後はターミナルに出る
 `vi.spyOn` の後始末は `spy.mockRestore()` または `vi.restoreAllMocks()` ([6.10 節](#610-状態リセット--3-種類の使い分け))。
 **`vi.clearAllMocks()` / `clearMocks: true` では "本物への復元" はされない** ので、`vi.spyOn` を使うときは `restoreMocks: true` を有効にしておくか、明示的に `mockRestore()` を呼ぶのが安全。
 
-### 6.7 型付け: `vi.mocked()`
+### 6.7 型付け: `vi.mocked()` — `vi.mock()` との違い
 
-TypeScript で `vi.mock` した関数を呼び出すとき、IDE には元の型しか見えず `.mockResolvedValue` などが補完されない。`vi.mocked` でラップすると「モックです」という型情報が付く:
+名前が 1 文字違い (`mock` と `mocked`) のため最も混同されやすいペア。**役割は全く別物** です。
+
+#### 一言で言うと
+
+| 関数 | 役割 | 動作するレイヤー |
+|------|------|------------------|
+| `vi.mock(path, factory?)` | **モジュールの中身を実体として差し替える** | ランタイム (実行時の挙動を変える) |
+| `vi.mocked(fn)` | **既にモック化済みの関数に "モックです" という型情報だけを付け直す** | TypeScript の型レベルだけ (ランタイムは何もしない) |
+
+`vi.mocked()` は **TypeScript のための補助ユーティリティ** であり、JavaScript としては「**渡された関数をそのまま返すだけ**」の 1 行関数です。実体としてのモック化は `vi.mock()` が既に済ませている前提。
+
+#### 詳しい比較
+
+| | `vi.mock()` | `vi.mocked()` |
+|---|-------------|---------------|
+| 引数 | モジュールパス (+ factory) | モック化済みの関数や値 |
+| 戻り値 | なし (副作用のみ) | 渡された値そのもの (型だけ変わる) |
+| ランタイムでの動作 | モジュール解決を書き換える | **何もしない** (型キャストのみ) |
+| ホイスト | **される** ([12.2 節](#122-ホイスト-hoist--hoisting)) | されない (普通の関数呼び出し) |
+| 呼ぶ場所 | テストファイルのトップレベル | テスト本体のどこでも (通常は import の後) |
+| 必要性 | モックの成立に必須 | 純粋に補助。**消してもテストは動く** (ただし型エラー / 補完なしになる) |
+
+#### なぜ両方必要なのか — 実例
+
+TypeScript で `vi.mock()` だけを使うと、こういう状況になります:
+
+```ts
+vi.mock('../config/mail', () => ({
+  sendEmail: vi.fn(),
+}));
+
+import { sendEmail } from '../config/mail';
+
+// ランタイム: sendEmail は vi.fn() なので mockResolvedValue が存在する。
+// しかし TypeScript の型: 元の sendEmail (本物の関数の型) のまま。
+sendEmail.mockResolvedValue(undefined);
+// ❌ Property 'mockResolvedValue' does not exist on type
+//    '(to: string, subject: string, body: string) => Promise<void>'
+```
+
+なぜ型が変わらないか: `vi.mock` は **ランタイムの解決だけを書き換える** ので、コード上に書かれた `import { sendEmail } from '../config/mail'` の型 (= 本物のシグネチャ) は元のままだから。
+
+ここで `vi.mocked()` を使うと型だけが付け直されます:
 
 ```ts
 import { sendEmail } from '../config/mail';
 const mockedSendEmail = vi.mocked(sendEmail);
+//                       ↑
+//   ランタイム: sendEmail と全く同じ関数を返すだけ
+//   型レベル:   MockedFunction<typeof sendEmail> として扱われる
 
-mockedSendEmail.mockResolvedValue(undefined);   // 型補完が効く
-mockedSendEmail.mock.calls;                     // 同上
+mockedSendEmail.mockResolvedValue(undefined);  // ✅ 型補完が効く
+mockedSendEmail.mock.calls;                    // ✅ 同上
+expect(mockedSendEmail).toHaveBeenCalledOnce(); // ✅ 型もチェックも通る
 ```
+
+`vi.mocked` の実装は概念的にはこれだけ:
+
+```ts
+function mocked<T>(value: T): MockedFunction<T> {
+  return value as unknown as MockedFunction<T>;  // 型キャストだけ
+}
+```
+
+つまり JavaScript としては実質 **`as` 型アサーション** と等価。Vitest 公式の型付けに沿ったキャストヘルパ、というのが正体。
+
+#### よくある間違い
+
+```ts
+// ❌ vi.mocked() だけでは、モックは成立しない
+import { sendEmail } from '../config/mail';
+const m = vi.mocked(sendEmail);
+m.mockResolvedValue(undefined);  // ランタイムエラー!
+//   本物の sendEmail には mockResolvedValue は無いので落ちる
+```
+
+→ `vi.mock()` を先に書かないと、`sendEmail` は依然として本物の関数。**`vi.mocked()` は単独では使えない**。
+
+```ts
+// ✅ 正しい組み合わせ
+vi.mock('../config/mail', () => ({
+  sendEmail: vi.fn(),                          // ← (1) ランタイムでモック化
+}));
+
+import { sendEmail } from '../config/mail';
+const mockedSendEmail = vi.mocked(sendEmail);  // ← (2) 型を付け直すだけ
+
+mockedSendEmail.mockResolvedValue(undefined);  // ✅ 両方揃って初めて動く
+```
+
+#### 命名の覚え方
+
+英語の文法を意識すると見分けやすい:
+
+- **`vi.mock`** (動詞・能動形) — 「モック化する」という **動作**
+- **`vi.mocked`** (過去分詞) — 「もうモック化された (関数)」を **型として認める**
+
+JavaScript としては別物ですが、英語としては「動作 vs 状態」の関係になっています。
 
 ### 6.8 巻き上げが必要な変数: `vi.hoisted()`
 

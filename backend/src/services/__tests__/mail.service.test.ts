@@ -87,10 +87,40 @@ describe('sendMail', () => {
   });
 
   // --- ケース 3: エラー伝播 ---
+  //
+  // 「エラー伝播 (propagation)」とは:
+  //   下回り (sendEmail) で起きたエラーが、sendMail で握りつぶされず、
+  //   呼び出し元 (= ここではテストコード) まで素通しで投げ上がってくること。
+  //
+  //   呼び出し関係はこうなっている:
+  //     [テストコード]   → sendMail(...) → sendEmail(...)
+  //                                          ↑ ここで Error('SMTP down') を throw
+  //                         ↑ sendMail が try/catch していないので素通り
+  //     [テストコード]   ← エラーがここまで到達 → expect.rejects で検証
+  //
+  // なぜこれをわざわざテストするか:
+  //   仮に sendMail が中で try/catch してエラーを握りつぶしてしまうと
+  //   (例: ↓ のようなウッカリ実装)
+  //
+  //     export async function sendMail(...) {
+  //       try { await sendEmail({ ... }); }
+  //       catch (e) { console.error(e); /* return もしない、throw もしない */ }
+  //     }
+  //
+  //   呼び出し側 (route handler 等) は「メール送信成功」と誤認してしまう。
+  //   ユーザーには "送信完了" と表示されるのに実際は届いていない、という
+  //   サイレント失敗バグに繋がる。
+  //   このテストは「失敗はちゃんと呼び出し元に伝える」という sendMail の
+  //   インターフェース契約 (contract) を固定する役割を持つ。
   it('sendEmail がエラーを投げたら呼び出し元へ伝播する', async () => {
     // この it の中だけ rejected 動作に差し替える (beforeEach の resolve を上書き)。
     mockedSendEmail.mockRejectedValue(new Error('SMTP down'));
 
+    // 第 2 / 第 3 引数の 's' / 'b' は **意味のないプレースホルダ**。
+    // 「変な値を入れたときの挙動」を試しているわけではなく、sendMail を
+    // 呼ぶための適当な正常引数があれば何でも良い (エラーを起こすのは
+    // 下回りの sendEmail モック側なので、ここの入力値は結果に影響しない)。
+    //
     // `expect(promise).rejects.toThrow(...)` : Promise が reject されること、
     // かつそのエラーメッセージが期待どおりであることを同時に検証する
     // Vitest の非同期アサーション。await を忘れるとテストが
