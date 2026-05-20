@@ -1,0 +1,755 @@
+# Vitest リファレンス
+
+このドキュメントは **Vitest 自体** の機能・API・設定オプションを辞書的にまとめた日本語リファレンスです。
+
+- 「Vitest とはどんなライブラリで、どんな API が用意されているか」 → **このドキュメント**
+- 「本プロジェクトでは Vitest をどう使っているか / どこに何のテストがあるか」 → [`testing-implementation-guide.md`](./testing-implementation-guide.md)
+
+公式ドキュメント (英語): <https://vitest.dev/>
+
+---
+
+## 1. Vitest とは
+
+Vitest は **Vite ベースのテストランナー** です。Jest と API 互換 (`describe / it / expect / vi.fn` などほぼ同じ書き方) を保ちつつ、Vite と同じトランスパイラ (esbuild) を使うため:
+
+- TypeScript / ESM / JSX をネイティブに扱える (`ts-jest` のような変換層が不要)
+- Vite の `resolve.alias` や `plugins` をそのまま流用できる
+- 初回起動・ファイル変更時の再ビルドが速い
+- `vi.mock` の巻き上げ動作が Jest より直感的
+
+本プロジェクトでは、バックエンド (esbuild + ESM)・フロントエンド (Vite) の双方で採用しています。
+
+| 比較項目 | Vitest | Jest |
+|----------|--------|------|
+| トランスパイラ | esbuild (Vite と共有) | Babel / ts-jest |
+| ESM サポート | ネイティブ | 実験的 (`--experimental-vm-modules`) |
+| TypeScript | 設定不要 | `ts-jest` 等が必要 |
+| Watch モード | デフォルト (`vitest`) | `--watch` |
+| 並列実行 | スレッド / プロセスを選択可 | プロセス |
+| ESM の `vi.mock` | ホイスト + ESM 解決を統合 | 制約多め |
+| Jest との API 互換 | ほぼ同じ (`vi` を使う点だけ違う) | — |
+
+---
+
+## 2. 動作モデル
+
+```
+$ vitest run
+  │
+  ├─ 1. 設定ファイル (vitest.config.ts / vite.config.ts の test ブロック) を読み込み
+  ├─ 2. include パターンに合致するテストファイルを列挙
+  ├─ 3. globalSetup (登録があれば) を 1 回実行
+  ├─ 4. ワーカー (threads / forks) を起動、ファイルを配分
+  │       └─ 各ワーカー内で setupFiles → テスト本体 → teardown
+  ├─ 5. 結果を集約してレポート (デフォルトは default reporter)
+  └─ 6. 終了コード (失敗が 1 件でもあれば 1)
+```
+
+### 2.1 `vitest run` と `vitest` (watch) の違い
+
+| コマンド | 挙動 |
+|----------|------|
+| `vitest run` | 1 回実行して終了。CI や `npm test` 用 |
+| `vitest` / `vitest watch` | 監視モードで起動、ファイル変更があった分だけ再実行 |
+| `vitest --ui` | ブラウザ UI を起動。各テストの履歴・ファイル単位の出力を可視化 |
+
+---
+
+## 3. テスト構造 API
+
+### 3.1 `describe` / `it` (= `test`)
+
+```ts
+import { describe, it, expect } from 'vitest';
+
+describe('Calculator', () => {
+  it('1 + 1 は 2', () => {
+    expect(1 + 1).toBe(2);
+  });
+});
+```
+
+- `describe(name, fn)` … テストをグルーピング。ネスト可能。
+- `it(name, fn)` … 1 ケース。`test(name, fn)` も同一エイリアス。
+- どちらも非同期関数 (`async () => { ... }`) を渡せる。タイムアウトは第 3 引数で指定可能 (`it('...', fn, 5000)`)。
+
+### 3.2 修飾子
+
+| 修飾子 | 効果 |
+|--------|------|
+| `it.skip(name, fn)` | 実行をスキップ。レポートには "skipped" として残る |
+| `it.only(name, fn)` | このテストだけ実行 (他は自動 skip)。**コミット前に外す** |
+| `it.todo(name)` | 実装予定マーカー。本文を省ける |
+| `it.concurrent(name, fn)` | 同じ describe 内のテストを並列実行 (副作用に注意) |
+| `it.fails(name, fn)` | 失敗することを期待。逆 assert 用 |
+| `it.runIf(condition)(name, fn)` | 条件が真のときだけ実行 |
+| `it.skipIf(condition)(name, fn)` | 条件が真のときスキップ |
+
+`describe.skip` / `describe.only` も同様。
+
+### 3.3 パラメータ化: `it.each` / `describe.each`
+
+```ts
+it.each([
+  [1, 1, 2],
+  [2, 3, 5],
+  [10, -3, 7],
+])('add(%i, %i) は %i', (a, b, expected) => {
+  expect(a + b).toBe(expected);
+});
+```
+
+- 配列の各要素を引数として渡し、テスト名は `%s` / `%i` / `%d` などのフォーマッタで展開される。
+- オブジェクト配列も可: `it.each([{ a: 1, b: 2, want: 3 }])('add($a, $b) is $want', ({ a, b, want }) => { ... })`
+
+---
+
+## 4. ライフサイクルフック
+
+### 4.1 4 種類の基本フック
+
+| フック | 呼ばれるタイミング | スコープ |
+|--------|------------------|----------|
+| `beforeAll(fn)` | 最初のテストの前に 1 回 | 直近の `describe` (トップレベルならファイル全体) |
+| `afterAll(fn)` | 最後のテストの後に 1 回 | 同上 |
+| `beforeEach(fn)` | **各テストの前**に毎回 | 直近の `describe` の全 `it` |
+| `afterEach(fn)` | **各テストの後**に毎回 | 同上 |
+
+```ts
+describe('DB を使うテスト', () => {
+  beforeAll(async () => { await connect(); });
+  afterAll(async () => { await disconnect(); });
+  beforeEach(async () => { await cleanupDb(); });
+
+  it('A', async () => { /* ... */ });
+  it('B', async () => { /* ... */ });
+});
+```
+
+- フックは async OK。`afterAll` の中で `await pool.end()` 等のクリーンアップを忘れると Node プロセスが終わらない (本プロジェクトの実例: [実装ガイド 8.4](./testing-implementation-guide.md#84-poolend-を忘れると-node-プロセスが-hang))。
+- ネストした `describe` ではフックも入れ子で動く (外側 → 内側の順に before、内側 → 外側の順に after)。
+
+### 4.2 `globalSetup` と `setupFiles` との使い分け
+
+| 仕組み | 走るタイミング | 走る場所 | 主用途 |
+|--------|---------------|----------|--------|
+| `globalSetup` | **全テストファイル実行前に 1 回** | 独立した Node プロセス | 実 DB の起動待ち + スキーマ投入、共有リソースの確保 |
+| `setupFiles` | **各テストファイルの先頭で毎回** | 各ワーカープロセス | testing-library の DOM 拡張、グローバル `expect` 拡張、共通モック |
+| `beforeAll` (テストファイル内) | 当該ファイル先頭で 1 回 | 当該ワーカープロセス | そのファイルでしか使わない準備 |
+| `beforeEach` | 各 `it` の直前 | 同上 | DB クリーンアップ、モックリセット |
+
+本プロジェクトでは `globalSetup` を [`backend/src/__tests__/global-setup.ts`](../../../backend/src/__tests__/global-setup.ts) で使い、テスト用 MySQL のスキーマを初期化しています。
+
+---
+
+## 5. アサーション (`expect`)
+
+すべてのアサーションは `expect(actual).matcher(expected)` の形を取り、失敗するとそのテストが fail します。
+
+### 5.1 等価系
+
+| マッチャ | 用途 | 補足 |
+|----------|------|------|
+| `toBe(value)` | プリミティブの厳密等価 (`===`) | オブジェクトは参照同一性なので不向き |
+| `toEqual(value)` | **構造的に**等しいか (再帰的に比較) | `undefined` のプロパティは無視 |
+| `toStrictEqual(value)` | `toEqual` より厳しい | `undefined` プロパティ・クラス型の違いも検出 |
+
+```ts
+expect(2 + 2).toBe(4);
+expect({ a: 1, b: 2 }).toEqual({ a: 1, b: 2 });
+```
+
+### 5.2 真偽 / null / undefined
+
+| マッチャ | 期待値 |
+|----------|--------|
+| `toBeTruthy()` | 真値 |
+| `toBeFalsy()` | 偽値 |
+| `toBeNull()` | `=== null` |
+| `toBeUndefined()` | `=== undefined` |
+| `toBeDefined()` | `!== undefined` |
+
+### 5.3 数値
+
+| マッチャ | 用途 |
+|----------|------|
+| `toBeGreaterThan(n)` / `toBeGreaterThanOrEqual(n)` | `>` / `>=` |
+| `toBeLessThan(n)` / `toBeLessThanOrEqual(n)` | `<` / `<=` |
+| `toBeCloseTo(n, digits?)` | 浮動小数の誤差を許容 (`0.1 + 0.2` の比較に必須) |
+| `toBeNaN()` | `Number.isNaN(actual)` |
+
+### 5.4 文字列
+
+| マッチャ | 用途 |
+|----------|------|
+| `toMatch(regex \| string)` | 正規表現または部分文字列にマッチ |
+| `toContain(substring)` | 部分文字列を含む |
+
+```ts
+expect('hello world').toMatch(/world/);
+expect('<h2>Subject-A</h2>').toMatch(/<h2[^>]*>Subject-A<\/h2>/);
+```
+
+### 5.5 配列 / オブジェクト
+
+| マッチャ | 用途 |
+|----------|------|
+| `toHaveLength(n)` | `array.length === n` (文字列にも使える) |
+| `toContain(item)` | 要素を含む (`===` 比較) |
+| `toContainEqual(item)` | 要素を含む (`toEqual` 比較、オブジェクト要素に有効) |
+| `toMatchObject(partial)` | オブジェクトの一部キーが一致 |
+| `toHaveProperty(path, value?)` | ネスト下のキー存在 / 値を検査 (`'user.name'`) |
+
+```ts
+expect([{ id: 1 }, { id: 2 }]).toContainEqual({ id: 1 });
+expect({ a: 1, b: 2, c: 3 }).toMatchObject({ a: 1, b: 2 });
+```
+
+### 5.6 例外
+
+| マッチャ | 用途 |
+|----------|------|
+| `toThrow()` | 何らかの throw |
+| `toThrow(message \| regex \| ErrorClass)` | メッセージ / 型を検査 |
+| `toThrowError(...)` | `toThrow` のエイリアス |
+
+```ts
+expect(() => parseConfig('')).toThrow(/empty/);
+expect(() => parseConfig('')).toThrow(ValidationError);
+```
+
+### 5.7 非同期 (`.resolves` / `.rejects`)
+
+```ts
+await expect(fetchUser(1)).resolves.toEqual({ id: 1, name: 'a' });
+await expect(fetchUser(-1)).rejects.toThrow('not found');
+```
+
+- 必ず `await` を付ける。**`await` を忘れると assert が走らずテストが通ったように見える**。
+- 単純な await 後の expect でも書ける: `const u = await fetchUser(1); expect(u).toEqual(...)`。
+
+### 5.8 モック検証
+
+| マッチャ | 用途 |
+|----------|------|
+| `toHaveBeenCalled()` | 1 回以上呼ばれた |
+| `toHaveBeenCalledTimes(n)` | ちょうど n 回呼ばれた |
+| `toHaveBeenCalledOnce()` | ちょうど 1 回 |
+| `toHaveBeenCalledWith(...args)` | 引数完全一致で呼ばれた (どの呼び出しでも 1 回でも該当すれば OK) |
+| `toHaveBeenLastCalledWith(...args)` | 最後の呼び出しの引数を検査 |
+| `toHaveBeenNthCalledWith(n, ...args)` | n 回目の呼び出しの引数を検査 |
+| `toHaveReturnedWith(value)` | 戻り値の検査 |
+| `toHaveReturnedTimes(n)` | 戻り値ありで n 回 |
+
+```ts
+expect(mockedFn).toHaveBeenCalledOnce();
+expect(mockedFn).toHaveBeenCalledWith('expected-arg', expect.any(Number));
+```
+
+### 5.9 修飾子・補助
+
+| 形 | 用途 |
+|----|------|
+| `expect(x).not.toBe(...)` | 否定 |
+| `expect.any(Constructor)` | 値が何でも良い (型だけ検査): `expect.any(Number)` |
+| `expect.anything()` | `null` / `undefined` 以外の任意 |
+| `expect.objectContaining({ ... })` | 一部キー一致 |
+| `expect.arrayContaining([...])` | 一部要素を含む |
+| `expect.stringContaining('xxx')` | 文字列に部分一致 |
+| `expect.stringMatching(/regex/)` | 文字列に正規表現一致 |
+| `expect.closeTo(n, digits?)` | 数値の誤差許容 |
+| `expect.assertions(n)` | このテストで n 回の assert が走ったことを保証 (非同期テスト用) |
+| `expect.hasAssertions()` | 少なくとも 1 回 assert が走ったことを保証 |
+
+```ts
+expect(mockedFn).toHaveBeenCalledWith(expect.objectContaining({
+  from: 'sender@example.com',
+  to: expect.any(String),
+}));
+```
+
+### 5.10 スナップショット
+
+| マッチャ | 用途 |
+|----------|------|
+| `toMatchSnapshot()` | 値を別ファイル (`__snapshots__/...`) に保存し、次回以降は差分検査 |
+| `toMatchInlineSnapshot(\`...\`)` | スナップショットをテストコード内に展開 |
+| `toMatchFileSnapshot(path)` | 指定ファイルに保存 |
+
+UI 出力や複雑なオブジェクトのリグレッション検出に便利。更新するときは `vitest --update` (または `-u`)。
+
+---
+
+## 6. モック (`vi`)
+
+### 6.1 関数モック: `vi.fn()`
+
+```ts
+const cb = vi.fn();
+cb('hello');
+cb(42);
+
+expect(cb).toHaveBeenCalledTimes(2);
+expect(cb.mock.calls[0][0]).toBe('hello');
+```
+
+戻り値・実装の設定:
+
+| メソッド | 効果 |
+|----------|------|
+| `mockReturnValue(v)` | 同期で `v` を返す |
+| `mockReturnValueOnce(v)` | 次の 1 回だけ `v`、その後は元の挙動 |
+| `mockResolvedValue(v)` | `Promise.resolve(v)` を返す |
+| `mockResolvedValueOnce(v)` | 次の 1 回だけ |
+| `mockRejectedValue(e)` | `Promise.reject(e)` を返す |
+| `mockRejectedValueOnce(e)` | 次の 1 回だけ |
+| `mockImplementation(fn)` | 任意の関数で全置換 |
+| `mockImplementationOnce(fn)` | 次の 1 回だけ |
+| `mockName(name)` | 失敗メッセージで識別しやすい名前を付ける |
+
+### 6.2 呼び出し履歴の検査
+
+| プロパティ | 内容 |
+|------------|------|
+| `fn.mock.calls` | `Array<引数配列>` (例: `mock.calls[0][1]` = 1 回目の 2 番目の引数) |
+| `fn.mock.results` | `Array<{ type: 'return'\|'throw', value }>` |
+| `fn.mock.instances` | `new` で呼ばれた場合の `this` 一覧 |
+| `fn.mock.lastCall` | 最後の呼び出しの引数配列 |
+
+### 6.3 モジュールモック: `vi.mock()`
+
+```ts
+vi.mock('../config/mail', () => ({
+  sendEmail: vi.fn(),
+}));
+
+import { sendEmail } from '../config/mail';  // ← 上で差し替えた版が読まれる
+```
+
+- `vi.mock(path, factory?)` は **ファイル先頭にホイストされる** (Vitest のトランスフォーマーが自動で行う)。物理的な行が import より下にあっても、実行時には import より先に走る。
+- factory を省略すると、対象モジュールの全 export が自動的に `vi.fn()` で置換される (auto-mock)。
+- パスは **import するときと同じ書き方** を渡す (`../foo`, `@/lib/bar`, パッケージ名 `'qrcode'` など)。
+
+### 6.4 部分モック: `vi.importActual()`
+
+「特定の関数だけ差し替えて、それ以外は本物を使いたい」場合:
+
+```ts
+vi.mock('../config/mail', async () => {
+  const actual = await vi.importActual<typeof import('../config/mail')>('../config/mail');
+  return {
+    ...actual,
+    sendEmail: vi.fn(),  // sendEmail だけモック、他は本物
+  };
+});
+```
+
+### 6.5 `vi.doMock()` (ホイストしない版)
+
+`vi.doMock()` は **巻き上げが起こらない** バージョン。テストの途中でモック内容を切り替えたい場合に使う。代わりに、対象モジュールはモック宣言の **後で動的 import** する必要がある。
+
+```ts
+beforeEach(() => {
+  vi.doMock('./flag', () => ({ enabled: true }));
+});
+
+it('動的 import', async () => {
+  const { runIfEnabled } = await import('./feature');
+  // ...
+});
+```
+
+### 6.6 スパイ: `vi.spyOn()`
+
+「実装は本物のまま、呼ばれたかだけ記録したい」場合:
+
+```ts
+const spy = vi.spyOn(console, 'log');
+foo();
+expect(spy).toHaveBeenCalledWith('expected message');
+spy.mockRestore();  // 後始末
+```
+
+返り値も `vi.fn()` と同じインターフェースなので、後から `.mockReturnValue(...)` で差し替えることもできる。
+
+### 6.7 型付け: `vi.mocked()`
+
+TypeScript で `vi.mock` した関数を呼び出すとき、IDE には元の型しか見えず `.mockResolvedValue` などが補完されない。`vi.mocked` でラップすると「モックです」という型情報が付く:
+
+```ts
+import { sendEmail } from '../config/mail';
+const mockedSendEmail = vi.mocked(sendEmail);
+
+mockedSendEmail.mockResolvedValue(undefined);   // 型補完が効く
+mockedSendEmail.mock.calls;                     // 同上
+```
+
+### 6.8 巻き上げが必要な変数: `vi.hoisted()`
+
+`vi.mock` のファクトリ関数の中では、テストファイル冒頭の `const` などは参照できない (ホイスト先で未定義になる)。
+これを回避するのが `vi.hoisted()`:
+
+```ts
+const mocks = vi.hoisted(() => ({
+  send: vi.fn(),
+}));
+
+vi.mock('../config/mail', () => ({
+  sendEmail: mocks.send,  // ← vi.mock より先に評価される
+}));
+
+mocks.send.mockResolvedValue(undefined);
+```
+
+### 6.9 グローバル / 環境変数
+
+| API | 用途 |
+|-----|------|
+| `vi.stubGlobal(name, value)` | `globalThis[name]` を一時的に差し替え (`fetch`, `localStorage` 等) |
+| `vi.unstubAllGlobals()` | 差し替えを全部戻す (`afterEach` で呼ぶ慣例) |
+| `vi.stubEnv(key, value)` | `process.env[key]` を差し替え (Vite では `import.meta.env` も) |
+| `vi.unstubAllEnvs()` | 環境変数を全部戻す |
+
+```ts
+beforeEach(() => vi.stubGlobal('fetch', vi.fn()));
+afterEach(() => vi.unstubAllGlobals());
+```
+
+`config` で `unstubGlobals: true` / `unstubEnvs: true` を入れておけば、`afterEach` を書かなくても自動で復元される。
+
+### 6.10 状態リセット — 3 種類の使い分け
+
+| 関数 / config キー | リセット対象 | 残るもの |
+|--------------------|--------------|----------|
+| `vi.clearAllMocks()` / `clearMocks: true` | 呼び出し履歴 (`mock.calls` / `results` / `instances`) | **実装** (`mockReturnValue` 等) |
+| `vi.resetAllMocks()` / `resetMocks: true` | 履歴 + 実装 (引数なし `vi.fn()` に戻す) | — |
+| `vi.restoreAllMocks()` / `restoreMocks: true` | 履歴 + 実装 + **`vi.spyOn` で奪った元実装を戻す** | — |
+
+「`mockResolvedValue` が次のテストに漏れない方が良い」 → `resetMocks: true`
+「`vi.spyOn` の後始末も自動でやってほしい」 → `restoreMocks: true`
+
+本プロジェクトは `clearMocks: true` のみを使っているため、`beforeEach` で `mockedSendEmail.mockResolvedValue(undefined)` のように **実装を毎回張り直す** スタイル ([実装ガイド 5.1 〜 5.2](./testing-implementation-guide.md#5-テスト種別ごとの書き方-実例) 参照)。
+
+---
+
+## 7. タイマー操作
+
+時間に依存するコード (`setTimeout` / `setInterval` / `Date.now()`) を制御するためのモック。
+
+```ts
+beforeEach(() => vi.useFakeTimers());
+afterEach(() => vi.useRealTimers());
+
+it('1 秒後に呼ばれる', () => {
+  const cb = vi.fn();
+  setTimeout(cb, 1000);
+
+  expect(cb).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(1000);
+  expect(cb).toHaveBeenCalled();
+});
+```
+
+| API | 効果 |
+|-----|------|
+| `vi.useFakeTimers()` | 偽タイマーに切り替え (時間が進まなくなる) |
+| `vi.useRealTimers()` | 元に戻す |
+| `vi.advanceTimersByTime(ms)` | 指定ミリ秒だけ進める |
+| `vi.advanceTimersToNextTimer()` | 次の予約まで進める |
+| `vi.runAllTimers()` | すべての予約を順に実行 |
+| `vi.runOnlyPendingTimers()` | 現時点で予約済みのものだけ実行 (実行中に予約された新規 timer は無視) |
+| `vi.setSystemTime(date)` | `Date.now()` / `new Date()` の基準時刻を固定 |
+| `vi.getMockedSystemTime()` | 設定済みの偽時刻を取得 |
+
+オプション付き fake timers (`{ shouldAdvanceTime: true }` 等) も指定できるが、多くの場合はデフォルトで十分。
+
+---
+
+## 8. 非同期テスト
+
+### 8.1 基本
+
+```ts
+it('async/await で書く', async () => {
+  const user = await fetchUser(1);
+  expect(user.name).toBe('Alice');
+});
+```
+
+`async` 関数で書き、`await` で待つだけ。返り値が Promise なら Vitest が解決を待ってから次のテストへ進む。
+
+### 8.2 `.resolves` / `.rejects` の使い分け
+
+```ts
+// fulfilled の値を assert
+await expect(fetchUser(1)).resolves.toEqual({ id: 1, name: 'a' });
+
+// rejected を assert
+await expect(fetchUser(-1)).rejects.toThrow('not found');
+```
+
+- 単に「Promise が解決すればよい」だけなら `await fetchUser(1)` でも OK。
+- `.rejects` は「エラーになる」事を主目的に書きたい場面に向く (try/catch を書くより簡潔)。
+- どちらの形でも **`await` を必ず付ける**。
+
+### 8.3 `expect.assertions(n)`
+
+非同期テストでは「assert に到達せず通った」事故が起きやすい。`expect.assertions(n)` を入れておくと、最終的に n 回の assert が呼ばれなかった場合に fail する:
+
+```ts
+it('rejects する', async () => {
+  expect.assertions(1);  // ← 必ず 1 回 assert が走ることを担保
+  try {
+    await throwingFn();
+  } catch (e) {
+    expect(e).toBeInstanceOf(MyError);
+  }
+});
+```
+
+`expect.hasAssertions()` は「1 回以上」を保証するゆるい版。
+
+---
+
+## 9. 設定 (`vitest.config.ts`)
+
+```ts
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  test: {
+    // ↓ ここに書ける
+  },
+});
+```
+
+主要オプション (本プロジェクトで利用する/しないにかかわらず代表的なものを表で網羅):
+
+### 9.1 対象選定
+
+| キー | 既定値 | 説明 |
+|------|--------|------|
+| `include` | `['**/*.{test,spec}.?(c\|m)[jt]s?(x)']` | テストファイルとみなす glob |
+| `exclude` | `['**/node_modules/**', '**/dist/**', ...]` | 除外 glob |
+| `testNamePattern` | — | テスト名 (describe + it) を正規表現で絞る。CLI の `-t` と同じ |
+
+### 9.2 環境
+
+| キー | 既定値 | 説明 |
+|------|--------|------|
+| `environment` | `'node'` | テストを走らせる環境。`'jsdom'` / `'happy-dom'` / `'edge-runtime'` も選べる |
+| `globals` | `false` | `true` にすると `describe / it / expect / vi` を import 不要で使える (Jest 互換) |
+
+本プロジェクトでは `globals: false` のままで、毎ファイル明示 import している (Bundler 視点で何が使われているか追える)。
+
+### 9.3 モック挙動
+
+| キー | 効果 |
+|------|------|
+| `clearMocks` | 各テスト前に `vi.clearAllMocks()` 相当 (履歴のみクリア) |
+| `mockReset` / `resetMocks` | 各テスト前に `vi.resetAllMocks()` (履歴 + 実装) |
+| `restoreMocks` | 各テスト前に `vi.restoreAllMocks()` (履歴 + 実装 + スパイ復元) |
+| `unstubGlobals` | 各テスト前に `vi.unstubAllGlobals()` |
+| `unstubEnvs` | 各テスト前に `vi.unstubAllEnvs()` |
+
+3 つの「リセット系」の違いは [6.10 節](#610-状態リセット--3-種類の使い分け) を参照。
+
+### 9.4 並列性
+
+| キー | 既定値 | 説明 |
+|------|--------|------|
+| `fileParallelism` | `true` | 複数テストファイルを並列実行するか |
+| `pool` | `'threads'` (条件で `'forks'`) | ワーカープール種別。`'threads'` / `'forks'` / `'vmThreads'` / `'vmForks'` |
+| `poolOptions` | — | `pool` ごとの細かい設定 (`threads.singleThread`, `forks.singleFork`, `forks.minForks`, `forks.maxForks` 等) |
+| `isolate` | `true` | ファイルごとにモジュールキャッシュを分離するか (`false` にすると高速だが副作用に注意) |
+
+本プロジェクトの結合テスト側 (`vitest.integration.config.ts`) は **DB 共有のため直列化** が必要なので
+`fileParallelism: false` + `pool: 'forks'` + `poolOptions: { forks: { singleFork: true } }` を使う。
+
+### 9.5 タイムアウト
+
+| キー | 既定値 | 用途 |
+|------|--------|------|
+| `testTimeout` | `5000` (ms) | 各 `it` の上限 |
+| `hookTimeout` | `10000` (ms) | `beforeAll` / `afterAll` 等の上限 |
+| `teardownTimeout` | `10000` (ms) | `globalSetup` 戻り値の teardown 関数の上限 |
+
+### 9.6 共有処理
+
+| キー | 用途 |
+|------|------|
+| `globalSetup` | 全テスト実行の前後に 1 回ずつ走るスクリプト ([4.2 節](#42-globalsetup-と-setupfiles-との使い分け)) |
+| `setupFiles` | 各テストファイルの先頭で走るスクリプト (jest-dom 拡張、共通モック等) |
+| `globalTeardown` | `globalSetup` とペアの後始末 (戻り値で渡す方式が多い) |
+
+### 9.7 その他
+
+| キー | 用途 |
+|------|------|
+| `env` | テストプロセスの `process.env` に注入する変数 (dotenv より先に効く) |
+| `alias` | パスエイリアス。Vite の `resolve.alias` と同じ書式 |
+| `coverage` | カバレッジ設定 (`provider: 'v8' \| 'istanbul'`, `reporter`, `include`, `exclude`, `thresholds` 等) |
+| `reporters` | レポーター指定 (`'default'` / `'verbose'` / `'junit'` / `'json'` / `'html'`) |
+| `retry` | 失敗時の自動リトライ回数 |
+| `bail` | n 件失敗したら以降のテストを中断 |
+
+---
+
+## 10. CLI
+
+### 10.1 サブコマンド
+
+| コマンド | 意味 |
+|----------|------|
+| `vitest` | watch モードで起動 (`vitest watch` と同じ) |
+| `vitest run` | 1 回実行して終了 |
+| `vitest watch` | watch モード明示版 |
+| `vitest dev` | watch + 開発用デフォルト |
+| `vitest related <file>` | 指定ファイルに関連するテストだけ実行 |
+| `vitest bench` | ベンチマーク実行 (`bench()` ブロック対象) |
+| `vitest --ui` | ブラウザ UI で実行 |
+
+### 10.2 主要フラグ
+
+| フラグ | 効果 |
+|--------|------|
+| `--config <path>` | 設定ファイルを明示 (本プロジェクトの `npm run test:integration` で使用) |
+| `-t <regex>` / `--testNamePattern <regex>` | テスト名フィルタ |
+| `--coverage` | カバレッジを取る |
+| `--reporter <name>` | レポーター指定 (複数可) |
+| `--changed [ref]` | git で変更されたファイルに関連するテストだけ実行 |
+| `--retry <n>` | 失敗時にリトライ |
+| `--bail <n>` | n 件失敗で中断 |
+| `--silent` | 標準出力を抑制 |
+| `--update` / `-u` | スナップショットを更新 |
+| `--passWithNoTests` | テストが 0 件でも成功扱い |
+| `--shard <i>/<n>` | テストを `n` 個に分割し `i` 番目を実行 (CI 並列化) |
+
+---
+
+## 11. 本プロジェクトでの使い方の対応表
+
+公式 API がこのリポジトリの **どこで** 使われているかの目次。実装の細部は [`testing-implementation-guide.md`](./testing-implementation-guide.md) を参照。
+
+| Vitest API | プロジェクト内の使用箇所 |
+|------------|--------------------------|
+| `describe` / `it` / `expect` | すべてのテストファイル |
+| `beforeEach` | `backend/src/services/__tests__/*.test.ts` で `mockResolvedValue` を毎回張り直し / 結合テストの `cleanupDb` |
+| `afterAll` | 結合 / E2E テストで `pool.end()` を呼ぶ |
+| `vi.mock()` | `backend/src/services/__tests__/mail.service.test.ts` で `../../config/mail`、`qrcode.service.test.ts` で `qrcode` / `storage.service` |
+| `vi.mocked()` | 同上。型補完を効かせるため |
+| `vi.fn()` | `vi.mock` のファクトリ内で関数差し替えに使用 |
+| `vi.stubGlobal` / `vi.unstubAllGlobals` | `frontend/src/lib/__tests__/api.test.ts` で `fetch` を差し替え |
+| `mockResolvedValue` / `mockRejectedValue` | `mail.service.test.ts` のエラー伝播ケース等 |
+| `toHaveBeenCalledOnce` / `toHaveBeenCalledWith` | 全モック検証で使用 |
+| `expect(...).rejects.toThrow(...)` | `mail.service.test.ts` ケース 3 |
+| `toMatch` / `toContain` / `toBe` | アサーションの基本 |
+| `globalSetup` (config) | `backend/vitest.integration.config.ts` → `backend/src/__tests__/global-setup.ts` |
+| `pool: 'forks'` + `singleFork: true` (config) | `vitest.integration.config.ts` (DB 共有のため直列化) |
+| `env:` (config) | `vitest.integration.config.ts` でテスト DB / S3 / Auth の接続情報を注入 |
+| `clearMocks: true` (config) | 両 `vitest.config.ts` / `vitest.integration.config.ts` |
+
+未使用の API (`vi.useFakeTimers`, `vi.spyOn`, `vi.hoisted`, `it.each`, スナップショット系等) は本ドキュメント上記の各節を参照。
+
+---
+
+## 12. 用語解説
+
+このドキュメントで前提として使っている用語のうち、本プロジェクトの理解に重要なものを補足する。
+
+### 12.1 トランスパイラ (transpiler)
+
+**「あるバージョン / 言語のソースコードを、別バージョン / 言語のソースコードへ変換するツール」** のこと。`translator + compiler` の合成語。出力も**ソースコード** (機械語ではない) という点で、伝統的な「コンパイラ」とは区別される。
+
+代表的な変換例:
+
+| 変換元 | 変換先 | 用途 |
+|--------|--------|------|
+| TypeScript | JavaScript | 型を剥がしてランタイムで実行可能にする |
+| ES2024 の新構文 | ES5 の古い構文 | 古いブラウザでも動かす |
+| JSX | 関数呼び出し (`React.createElement(...)`) | ブラウザは JSX を直接読めないため |
+| ESM (`import/export`) | CommonJS (`require/module.exports`) | Node の旧モジュール形式に合わせる |
+
+代表的な実装:
+
+| 実装 | 速度 | 主な採用先 |
+|------|------|------------|
+| `tsc` | 遅い (型チェック付き) | TypeScript 公式コンパイラ |
+| `Babel` | 中 | Jest や旧来の React プロジェクト |
+| `esbuild` | 非常に速い (Go 製) | **Vite / Vitest** が採用 |
+| `swc` | 非常に速い (Rust 製) | Next.js などが採用 |
+
+**本プロジェクトで重要なのは esbuild**:
+- フロントエンドの Vite と Vitest が同じ esbuild を共有しているため、`vite.config.ts` の `resolve.alias` や `plugins` の設定がテストにもそのまま効く。
+- バックエンドの `build` / `build:lambda` スクリプトも esbuild を使う (`backend/package.json` 参照)。`tsx watch src/index.ts` の `tsx` も内部は esbuild。
+- TypeScript 用に別途 `ts-jest` のような変換層を入れなくて済むのが、Jest に対する Vitest の大きな利点 ([1 章](#1-vitest-とは) の比較表参照)。
+
+**コンパイラとの違い**: 「コンパイラは高レベル言語 → 機械語 (異なる抽象レベルへの変換)」「トランスパイラは高レベル言語 → 高レベル言語 (同じ抽象レベル内の変換)」とよく説明される。厳密な境界はないが、JS / TS まわりのソース変換ツールは慣習的に「トランスパイラ」と呼ばれる。
+
+### 12.2 ホイスト (hoist / hoisting)
+
+英語で「巻き上げる / 持ち上げる」。プログラミングでは **「コードの実行時に、ある宣言や呼び出しが、書かれた場所より前のほうへ "持ち上げられる" 挙動」** を指す。
+
+JavaScript の文脈では 2 種類のホイストがあり、混同しやすいので区別が大事。
+
+#### (1) JavaScript エンジンが自動でやるホイスト — 言語仕様
+
+`var` 宣言と `function` 宣言は、書いた位置に関係なくスコープの先頭で「宣言された扱い」になる:
+
+```js
+console.log(foo());  // "hi" ← 後で定義しているのに呼べる
+console.log(x);      // undefined ← エラーにならない (宣言だけ持ち上がる)
+
+function foo() { return 'hi'; }
+var x = 10;
+```
+
+これは JS エンジンが「宣言部分だけを先に読む」ためで、`let` / `const` には起こらない (TDZ: Temporal Dead Zone)。
+
+#### (2) ツールが意図的にやるホイスト — Vitest の `vi.mock` がこれ
+
+Vitest のトランスフォーマー ([12.1](#121-トランスパイラ-transpiler) 参照) は、テストファイルをパースして `vi.mock(...)` の行を**物理的にファイル先頭へ移動**してから実行する。
+
+```ts
+// 書いたコード
+import { sendEmail } from '../config/mail';
+vi.mock('../config/mail', () => ({ sendEmail: vi.fn() }));
+```
+
+```ts
+// 実際に走るコード (ホイスト後)
+vi.mock('../config/mail', () => ({ sendEmail: vi.fn() }));
+import { sendEmail } from '../config/mail';
+```
+
+**なぜホイストが必要か**: ES Modules では `import` 文がファイル中で最初に評価される仕様。何もしないと「`import` で本物が読まれた**後**に `vi.mock` が走る」ことになりモックが効かない。Vitest はこの順序を強制的にひっくり返すために `vi.mock` を巻き上げる。
+
+```
+ホイストなし:  import (本物が読まれる)  → vi.mock (もう遅い)
+ホイストあり:  vi.mock (差し替え設定)   → import (差し替え版が読まれる) ✓
+```
+
+**ホイストの副作用 (ハマりやすいポイント)**:
+
+`vi.mock` のファクトリ関数からファイル冒頭の `const` などを参照すると、ホイスト先で未定義になって壊れる:
+
+```ts
+const fakeSend = vi.fn();           // ← (1)
+vi.mock('../config/mail', () => ({
+  sendEmail: fakeSend,              // ← (2) ホイストされるとここは (1) より先に評価される
+}));
+```
+
+→ 回避策は [6.8 節](#68-巻き上げが必要な変数-vihoisted) の `vi.hoisted()`。
+→ そもそもホイストを止めたいときは [6.5 節](#65-vidomock-ホイストしない版) の `vi.doMock()` を使う。
+
+---
+
+## 13. 関連ドキュメント
+
+- [`testing-implementation-guide.md`](./testing-implementation-guide.md) — 本プロジェクトの **テスト実装記録** (どこに何を置いてどう書いたか)
+- [`backend-testing-strategy.md`](../backend-testing-strategy.md) — テスト粒度の戦略 (Unit / Integration / E2E の使い分け)
+- 公式ドキュメント: <https://vitest.dev/>
+- Vitest API リファレンス: <https://vitest.dev/api/>
+- Vitest 設定リファレンス: <https://vitest.dev/config/>
