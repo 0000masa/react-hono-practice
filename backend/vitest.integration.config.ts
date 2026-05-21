@@ -61,6 +61,12 @@ export default defineConfig({
       DATABASE_PASSWORD: 'password',
       S3_BUCKET: 'test-bucket',
       STORAGE_URL_BASE: 'http://localhost:9000/test-bucket',
+      // テスト時はダミー URL。aws-sdk-client-mock(SQSClient) が `.send` を
+      // 横取りするため実体には到達しないが、空文字以外をセットすることで
+      // controllers/qrcodes.controller.ts:13 の
+      //   const sqsClient = env.SQS_QUEUE_URL ? new SQSClient({}) : null;
+      // が非 null になり、storeAsync の SQS 経路 (本番想定) を踏める。
+      SQS_QUEUE_URL: 'http://localhost:4566/000000000000/test-queue',
       MAIL_FROM: 'test@example.com',
       FRONTEND_URL: 'http://localhost:5173',
       BETTER_AUTH_SECRET: 'test-secret',

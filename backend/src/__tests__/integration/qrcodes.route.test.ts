@@ -16,10 +16,21 @@
  *      - 異常系: data 未指定 → 422、副作用 (DB / S3) が一切発生しない
  *      - 異常系: data が 1001 文字 (上限 1000 超え) → 422
  *      - 異常系: 認証なし → 401
+ *   3. POST /api/qrcodes/async (非同期版: SQS にジョブを投げる)
+ *      - 正常系: 202、DB に status='pending' で 1 件作成、SQS に SendMessage が 1 回
+ *      - 異常系: data 未指定 → 422、副作用 (DB / SQS) が一切発生しない
+ *      - 異常系: data が 1001 文字 → 422
+ *      - 異常系: 認証なし → 401
+ *   4. GET /api/qrcodes/:id/status (生成ステータス確認)
+ *      - 異常系: 未認証 → 401
+ *      - 異常系: 存在しない id → 404
+ *      - 正常系: status='pending' のとき url / file_name はレスポンスに含まれない
+ *      - 正常系: status='completed' のとき url / file_name が含まれる
  *
  * 何は **本物** を使い、何を **モック** にしているか:
  *   - 本物: Hono アプリ全体、ルーティング、Drizzle 経由の DB (テスト用 PostgreSQL)
- *   - モック: 認証 (better-auth の `getAuth()`)、AWS S3 (`S3Client.send`)
+ *   - モック: 認証 (better-auth の `getAuth()`)、AWS S3 (`S3Client.send`)、
+ *            AWS SQS (`SQSClient.send`)
  *   → DB は本物なので「挿入 → 取得」「外部キー整合性」までまとめて検証できる。
  *
  * いつ実行されるか: `*.test.ts` 扱い → `npm test` で走る (DB 接続が必要)。
@@ -31,6 +42,9 @@ import { describe, it, expect, beforeEach, vi, afterAll } from 'vitest';
 //   `.send()` がすべてモックに置き換わり、実 AWS / MinIO への通信は発生しない。
 import { mockClient } from 'aws-sdk-client-mock';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+// SQS 用は S3 と完全に同じ枠組み: `mockClient(SQSClient)` で `.send` を
+// 横取りし、`SendMessageCommand` の呼び出しを `commandCalls` で検査する。
+import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { createAuthMock, setSessionUser, clearSession, TEST_USER } from '../helpers/auth';
 import { cleanupDb } from '../helpers/db';
 
@@ -51,10 +65,19 @@ vi.mock('../../config/auth', () => createAuthMock());
 import app from '../../app';
 import { db, pool } from '../../config/database';
 import { users, qrCodes } from '../../db/schema';
+// `env` は controller と同じソース。テストで「期待される QueueUrl」と
+// 「実際に SendMessageCommand に乗った QueueUrl」を比較する際に使う。
+import { env } from '../../config/env';
 
 // このファイル全体で使い回す S3 モックのハンドル。
 // describe の外に置いて、beforeEach で reset することでテスト間の状態を切る。
 const s3Mock = mockClient(S3Client);
+
+// 同じく SQS クライアントのモックハンドル。
+// `vitest.integration.config.ts` で `SQS_QUEUE_URL` をダミー値にしているため、
+// controllers/qrcodes.controller.ts の `sqsClient = new SQSClient({})` は
+// 実体として生成されるが、その `.send` はこのモックが横取りする。
+const sqsMock = mockClient(SQSClient);
 
 // 各テストで使う「ログイン中ユーザー」を DB にも実体として用意するためのヘルパ。
 //
@@ -91,6 +114,12 @@ async function insertTestUser() {
 beforeEach(async () => {
   s3Mock.reset();
   s3Mock.on(PutObjectCommand).resolves({});
+  // SQS も S3 と同じ思想で初期化:
+  //   - reset で履歴と応答設定を消去
+  //   - 「SendMessage は黙って成功 (適当な MessageId を返す)」をデフォルトに
+  //     しておくことで、storeAsync 正常系テストが煩雑にならない。
+  sqsMock.reset();
+  sqsMock.on(SendMessageCommand).resolves({ MessageId: 'test-msg-id' });
   await cleanupDb();
   clearSession();
 });
@@ -255,5 +284,238 @@ describe('POST /api/qrcodes', () => {
     // 同じミドルウェアが効いているはずでも、ルートごとに `use(authMiddleware)`
     // を貼り忘れる事故が起きうるので、GET / POST の両方で 401 を押さえておく。
     expect(res.status).toBe(401);
+  });
+});
+
+describe('POST /api/qrcodes/async', () => {
+  // 非同期版エンドポイント。`store` (同期版) と違って QR 生成 / S3 アップロードは
+  // **その場で行わず**、SQS にジョブを投げて worker に処理させる設計。
+  // テストでは:
+  //   - HTTP レスポンスが 202 で `status: 'pending'` の即時返信になる
+  //   - DB には fileName='' / status='pending' で **先に行を作る** (worker が後で
+  //     update する想定)
+  //   - SQS には qrCodeId / data / userId を載せた SendMessageCommand が
+  //     1 回だけ送られる
+  // を一括で確認する。
+  beforeEach(() => {
+    setSessionUser(TEST_USER);
+  });
+
+  it('正常系: 202 を返し、DB に pending で 1 件作成、SQS に 1 回送信される', async () => {
+    await insertTestUser();
+
+    const res = await app.request('/api/qrcodes/async', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: 'async hello' }),
+    });
+
+    // --- アサーション 1: HTTP ステータス ---
+    // 202 Accepted は「リクエストは受け付けたが処理は非同期で進行中」を示す
+    // 標準的なステータス。同期版の 201 (Created) と取り違える事故を防ぐため
+    // ここで明示的に固定する。
+    expect(res.status).toBe(202);
+
+    // --- アサーション 2: レスポンス JSON の形 ---
+    const body = (await res.json()) as {
+      qrcode: { id: number; status: string; data: string };
+    };
+    // worker が後で 'completed' / 'failed' に更新するまでは 'pending'。
+    // ここを取り違えるとフロント側のポーリング表示が崩れるので明示。
+    expect(body.qrcode.status).toBe('pending');
+    expect(body.qrcode.data).toBe('async hello');
+    // id は auto_increment なので具体値は固定せず、「数値が入っている」だけ確認。
+    expect(typeof body.qrcode.id).toBe('number');
+
+    // --- アサーション 3: DB 副作用 ---
+    // 同期版とは違い、fileName='' & status='pending' という「ジョブ作成だけ
+    // 終わった状態」が確実に書き込まれていることを確認する。
+    // → ここが空だと「SQS に投げたのに DB に行が無い」= worker が picks up
+    //    できない致命バグ。
+    const stored = await db.select().from(qrCodes);
+    expect(stored).toHaveLength(1);
+    expect(stored[0].status).toBe('pending');
+    expect(stored[0].fileName).toBe('');
+    expect(stored[0].data).toBe('async hello');
+    expect(stored[0].userId).toBe(TEST_USER.id);
+
+    // --- アサーション 4: SQS 副作用 ---
+    // `sqsMock.commandCalls(SendMessageCommand)` は S3 と同じインターフェース。
+    // SendMessageCommand が **ちょうど 1 回** 呼ばれたこと、その引数が
+    //   - QueueUrl: env.SQS_QUEUE_URL (vitest config のダミー URL)
+    //   - MessageBody: JSON 文字列。parse すると { qrCodeId, data, userId }
+    // であることを固定する。
+    // MessageBody が壊れていると worker 側の JSON.parse が失敗してジョブが
+    // 進まないので、形状を一度ここで押さえておく価値が高い。
+    const sqsCalls = sqsMock.commandCalls(SendMessageCommand);
+    expect(sqsCalls).toHaveLength(1);
+    expect(sqsCalls[0].args[0].input.QueueUrl).toBe(env.SQS_QUEUE_URL);
+    const messageBody = JSON.parse(sqsCalls[0].args[0].input.MessageBody!) as {
+      qrCodeId: number;
+      data: string;
+      userId: number;
+    };
+    expect(messageBody.qrCodeId).toBe(stored[0].id);
+    expect(messageBody.data).toBe('async hello');
+    expect(messageBody.userId).toBe(TEST_USER.id);
+
+    // --- アサーション 5: S3 はこのパスでは呼ばれない ---
+    // 同期版との大事な違い。非同期版の controller は S3 を直接叩かず worker に
+    // 丸投げするはずなので、PutObjectCommand が 0 件であることを固定して
+    // 「うっかり同期版と同じ実装になっている」レグレッションを弾く。
+    expect(s3Mock.commandCalls(PutObjectCommand)).toHaveLength(0);
+  });
+
+  it('異常系: data 未指定なら 422、DB / SQS は変わらない', async () => {
+    await insertTestUser();
+
+    const res = await app.request('/api/qrcodes/async', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(422);
+
+    // バリデーション失敗時はジョブ自体を作らない。
+    //   - DB に行が増えない
+    //   - SQS にも送らない
+    // 同期版と同じく「中途半端な状態を残さない」ロールバック相当の挙動。
+    const stored = await db.select().from(qrCodes);
+    expect(stored).toHaveLength(0);
+    expect(sqsMock.commandCalls(SendMessageCommand)).toHaveLength(0);
+  });
+
+  it('異常系: data が 1001 文字なら 422 を返す', async () => {
+    await insertTestUser();
+
+    // store / storeAsync で同じ 1000 文字制限を実装している前提のため、
+    // 同期版テストと **同じ境界値** を踏んで、両者がズレないことも間接的に
+    // 担保する。
+    const res = await app.request('/api/qrcodes/async', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: 'a'.repeat(1001) }),
+    });
+
+    expect(res.status).toBe(422);
+  });
+
+  it('異常系: 認証なしなら 401', async () => {
+    clearSession();
+
+    const res = await app.request('/api/qrcodes/async', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: 'x' }),
+    });
+
+    // `routes/qrcodes.ts` で `use('*', authMiddleware)` が効いているはずでも、
+    // ルートごとの取りこぼし事故 (例: パスを書き間違える / 別ルータに切り出して
+    // ミドルウェアを忘れる) を防ぐため、新ルートを足すたびに 401 ケースを
+    // 個別に書いておく価値がある。
+    expect(res.status).toBe(401);
+  });
+});
+
+describe('GET /api/qrcodes/:id/status', () => {
+  // QR コード生成ジョブの進捗を取得するエンドポイント。
+  //   - 'pending' のとき: id / status / data / 日時のみ
+  //   - 'completed' のとき: 上記 + url / file_name (公開 URL とキー名)
+  //   - 'failed' のとき: 上記 + url / file_name は **含めない** (実装側で
+  //                     `status === 'completed' && fileName` の AND ガード)
+  // ここでは pending / completed の 2 形状と、404 / 401 を押さえる。
+
+  // テストごとに qr_codes に行を 1 件作るためのローカルヘルパ。
+  // - status を引数で切り替えられる
+  // - fileName / data はデフォルトを持つ
+  // - 返り値は採番された id (テスト内で URL に埋めるため)
+  // beforeEach で cleanupDb されているため毎回まっさらな状態から作る。
+  async function insertQrCode(params: {
+    status: 'pending' | 'completed' | 'failed';
+    fileName?: string;
+    data?: string;
+  }): Promise<number> {
+    const [row] = await db
+      .insert(qrCodes)
+      .values({
+        userId: TEST_USER.id,
+        fileName: params.fileName ?? '',
+        data: params.data ?? 'test',
+        status: params.status,
+      })
+      .$returningId();
+    return row.id;
+  }
+
+  it('異常系: 認証なしなら 401 を返す', async () => {
+    // セッションは beforeEach (ファイル直下) で clearSession 済み。
+    // 認証ミドルウェアが弾くため、id の中身は何でもよい (DB を見るより前に 401)。
+    const res = await app.request('/api/qrcodes/1/status');
+    expect(res.status).toBe(401);
+  });
+
+  it('異常系: 存在しない id なら 404 を返す', async () => {
+    setSessionUser(TEST_USER);
+    await insertTestUser();
+
+    // ユーザーは居るが qr_codes は 0 件 → どんな id を叩いても見つからない。
+    // 99999 は auto_increment の現実的な最大値より十分大きい数を選んでいる。
+    const res = await app.request('/api/qrcodes/99999/status');
+
+    // controller 内の `if (!qrCode) throw new HTTPException(404, ...)` を踏む。
+    // ここを 200 で空ボディを返してしまうとフロント側が「ジョブはあるが
+    // まだ準備中」と誤判定するため、404 を固定する意義は大きい。
+    expect(res.status).toBe(404);
+  });
+
+  it("正常系: status='pending' のときは url / file_name を返さない", async () => {
+    setSessionUser(TEST_USER);
+    await insertTestUser();
+    const id = await insertQrCode({ status: 'pending' });
+
+    const res = await app.request(`/api/qrcodes/${id}/status`);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+
+    // 必須プロパティの中身検証。
+    expect(body.id).toBe(id);
+    expect(body.status).toBe('pending');
+
+    // pending のときに公開 URL を返してしまうと、worker がまだファイルを
+    // アップロードしていないのにフロントがその URL を踏みにいって 404 を
+    // 引いてしまう。よって **キー自体が存在しないこと** を固定する。
+    // `toEqual({ url: undefined })` ではキーが存在する/しないを区別できないため、
+    // `not.toHaveProperty` を使う。
+    expect(body).not.toHaveProperty('url');
+    expect(body).not.toHaveProperty('file_name');
+  });
+
+  it("正常系: status='completed' のときは url / file_name を返す", async () => {
+    setSessionUser(TEST_USER);
+    await insertTestUser();
+    const id = await insertQrCode({
+      status: 'completed',
+      fileName: '1/x.png',
+    });
+
+    const res = await app.request(`/api/qrcodes/${id}/status`);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      id: number;
+      status: string;
+      url: string;
+      file_name: string;
+    };
+
+    expect(body.status).toBe('completed');
+    expect(body.file_name).toBe('1/x.png');
+    // url は `getFileUrl(fileName)` = `${STORAGE_URL_BASE}/${fileName}` で
+    // 組み立てられる。テスト用 env のベース URL は vitest.integration.config.ts
+    // で `http://localhost:9000/test-bucket` に固定されているので、
+    // 完全一致で検証してよい (本番値とは独立に成立する)。
+    expect(body.url).toBe(`${env.STORAGE_URL_BASE}/1/x.png`);
   });
 });
