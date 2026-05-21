@@ -31,11 +31,21 @@ export async function index(c: Context<Env>) {
   const to = total > 0 ? Math.min(offset + PER_PAGE, total) : null;
 
   const pagination: PaginationMeta = {
+    // 現在のページ番号。クエリの ?page=N から取得し、最小値は 1。
     current_page: page,
+    // 最後のページ番号 (= 総ページ数)。total / PER_PAGE の切り上げで、最小値は 1
+    // (total=0 でも 1 を返すことで「空の 1 ページ目」を表現する)。
     last_page: lastPage,
+    // 1 ページあたりの最大件数 (このエンドポイントでは固定 50 件)。
     per_page: PER_PAGE,
+    // 全件数 (users テーブルに存在するレコードの総数)。フィルタはかかっていない。
     total,
+    // このページが返している範囲の「最初の件数番号」(1 始まり、両端を含む)。
+    // 例: page=2, per_page=50 なら 51。total=0 のときは null。
     from,
+    // このページが返している範囲の「最後の件数番号」(1 始まり、両端を含む)。
+    // 例: page=2 で 51〜80 件目を返すなら 80。最終ページが端数なら total と同値。
+    // total=0 のときは null。
     to,
   };
 
