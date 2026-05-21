@@ -59,24 +59,19 @@ import { generateAndUpload } from '../qrcode.service';
 // ヘルパ)。実体としての差し替えは上の `vi.mock('qrcode', ...)` が既に
 // 済ませている前提。
 //
-// ところが QRCode.toBuffer はオーバーロードのため、`vi.mocked` が
-// 自動で付ける型はオーバーロード集合のうち callback 版 (戻り値 void) 寄りに
-// 選ばれてしまい、`mockResolvedValue(Buffer)` の引数型が合わなくなる。
-// そこで明示的に "Promise<Buffer> を返すモック" の型へキャストし直している:
+// ところが QRCode.toBuffer はオーバーロード (= 同じ関数名に対して複数の
+// 型シグネチャが宣言されている状態) のため、`vi.mocked()` に素のまま渡すと
+// 自動で選ばれる overload が callback 版 (戻り値 void) 寄りになり、
+// `mockResolvedValue(Buffer)` の引数型が合わなくなる。
 //
-//   `as unknown as X`
-//     → TypeScript は「型が全く違うもの」への直接の `as X` を拒否する。
-//        いったん `unknown` を経由する慣用句 (ダブルキャスト) で
-//        強制的にキャストしている。
-//   `ReturnType<typeof vi.fn<(...) => Promise<Buffer>>>`
-//     → 「`vi.fn<(...) => Promise<Buffer>>()` を呼び出したときの返り値の型」
-//        の意。実体は MockedFunction 相当 (mockResolvedValue / mock.calls
-//        などモック専用メソッドが生える型) を Promise<Buffer> 版で取得する。
+// 対策: `vi.mocked` に渡す前に "Promise<Buffer> を返す関数" として
+// キャストしておき、overload を 1 本に絞り込む。これにより以降の
+// `mockResolvedValue` / `mock.calls` の型推論が安定する。
 //
 // uploadFile 側はオーバーロードが無いので、普通の `vi.mocked()` だけで OK。
-const mockedToBuffer = vi.mocked(QRCode.toBuffer) as unknown as ReturnType<
-  typeof vi.fn<(data: string, options?: object) => Promise<Buffer>>
->;
+const mockedToBuffer = vi.mocked(
+  QRCode.toBuffer as (data: string, options?: object) => Promise<Buffer>,
+);
 const mockedUploadFile = vi.mocked(uploadFile);
 
 describe('generateAndUpload', () => {
