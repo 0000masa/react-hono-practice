@@ -67,6 +67,11 @@ export default defineConfig({
       //   const sqsClient = env.SQS_QUEUE_URL ? new SQSClient({}) : null;
       // が非 null になり、storeAsync の SQS 経路 (本番想定) を踏める。
       SQS_QUEUE_URL: 'http://localhost:4566/000000000000/test-queue',
+      // 同様に SES_REGION を入れて config/mail.ts の SES 分岐 (本番想定の経路)
+      // を選ばせる。`mockClient(SESClient)` が `.send` を握り潰すため、実 SES
+      // には到達しない。値そのものはモック側で検査されない (リージョン名の
+      // 妥当性は問わない) ので、適当な 'us-east-1' で十分。
+      SES_REGION: 'us-east-1',
       MAIL_FROM: 'test@example.com',
       FRONTEND_URL: 'http://localhost:5173',
       BETTER_AUTH_SECRET: 'test-secret',
