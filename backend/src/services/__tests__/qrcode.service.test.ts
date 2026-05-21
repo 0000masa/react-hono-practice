@@ -80,8 +80,17 @@ describe('generateAndUpload', () => {
   // ・mockedToBuffer.mockResolvedValue(Buffer.from('png-bytes'))
   //     `QRCode.toBuffer` が呼ばれたら、Buffer.from('png-bytes') を中身に持つ
   //     Promise を返すように設定。
-  //     `Buffer.from(string)` は「文字列を UTF-8 バイト列に変換した
-  //     Node の Buffer オブジェクト」を作る組み込み API。
+  //
+  //     ─── Buffer とは ───────────────────────────────────────────
+  //     `Buffer` は Node.js が標準で用意している「バイト列 (バイナリデータ)
+  //     を扱うためのクラス」。import 不要でグローバルに使える組み込み API。
+  //     (ブラウザの JavaScript には存在しない Node 固有のもの。後から
+  //      標準化された Uint8Array / ArrayBuffer と互換で、現在の Buffer は
+  //      Uint8Array を継承している。)
+  //     ─────────────────────────────────────────────────────────────
+  //
+  //     `Buffer.from(string)` は「文字列を UTF-8 バイト列に変換した Buffer
+  //     オブジェクト」を作るファクトリ関数。
   //     ここではテスト用のダミーで、本物の PNG バイナリの代用品。中身は
   //     何でも良い (テスト的に意味があるのは "Buffer であること" だけ)。
   //
@@ -102,11 +111,39 @@ describe('generateAndUpload', () => {
   it('QR を生成して S3 にアップロードし、ファイル名を返す', async () => {
     const fileName = await generateAndUpload('hello', 42);
 
+    // --- アサーション 1: toBuffer の呼び出し引数を検証 ---
+    // `toHaveBeenCalledWith(...期待引数)` は、対象のモック関数が指定した
+    // 引数で呼ばれたかを検証するマッチャ。各引数は内部的に深い等価比較
+    // (`expect.equals` 相当) で照合される。
+    //
+    // ここで確認していること:
+    //   - 第 1 引数が 'hello'
+    //       → generateAndUpload に渡したテキストが、そのまま toBuffer に
+    //         中継されているか (配管が正しいか) を見ている。
+    //   - 第 2 引数が { type: 'png', width: 300, margin: 1 }
+    //       → qrcode.service.ts でハードコードしているオプション値そのもの。
+    //
+    // この検証によって「generateAndUpload は受け取ったテキストを toBuffer に
+    // 渡し、決まったオプションを付ける」という関数の契約 (contract) が固定
+    // される。後でオプション値をうっかり変えてしまうとこのテストが落ちて
+    // 気づける = 仕様の回帰防止になる。
     expect(mockedToBuffer).toHaveBeenCalledWith('hello', {
       type: 'png',
       width: 300,
       margin: 1,
     });
+
+    // --- アサーション 2: uploadFile が「ちょうど 1 回」呼ばれたか ---
+    // `toHaveBeenCalledOnce()` はモックが **ぴったり 1 回** 呼ばれたことを
+    // 検証する糖衣マッチャ (`toHaveBeenCalledTimes(1)` と同じ意味)。
+    //
+    // なぜ「1 回」を明示的に固定するか:
+    //   ・0 回    → アップロード処理に到達していない (バグ: 早期 return など)
+    //   ・2 回以上 → ループ / 再試行で重複アップロード (バグ: 課金や容量に影響)
+    //   どちらも具合が悪いので、回数まで含めて契約として固定する。
+    //
+    // このテストでは「呼び出し回数」だけを見ている。引数の中身は次の it
+    // (「uploadFile に toBuffer の戻り値…」) で別途検証している。
     expect(mockedUploadFile).toHaveBeenCalledOnce();
 
     // {userId}_{unix_timestamp}_{8文字の hex}.png 形式
