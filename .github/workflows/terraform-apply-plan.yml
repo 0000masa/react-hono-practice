@@ -49,6 +49,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      ## 入力内容をジョブサマリーに表示
       - name: Show inputs in job summary
         run: |
           {
@@ -60,6 +61,7 @@ jobs:
             echo "| target_env | ${{ inputs.target_env }} |"
             echo "| enable_nat_gateway | ${{ inputs.enable_nat_gateway }} |"
           } >> $GITHUB_STEP_SUMMARY
+          
       #  AWS 認証 (OIDC ロール)
       - uses: aws-actions/configure-aws-credentials@v4
         with:
