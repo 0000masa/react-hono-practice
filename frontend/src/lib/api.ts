@@ -107,6 +107,12 @@ async function request<T = unknown>(
 // 利用例:
 //   const res = await apiClient.get<User[]>("/users");  // res.data は User[] 型
 //   await apiClient.post("/users", { name: "Taro" });
+//
+// メソッドの短縮記法（shorthand method syntax）を使用している
+// 値が関数の場合に限り、`:` と `function` キーワードを省略できる（ES2015 で導入）
+// 通常記法:   get: function<T>(url, config?) { ... },
+// 短縮記法:   get<T>(url, config?) { ... },
+// ※ アロー関数で書く場合は短縮記法は使えず `:` が必要（例: get: <T>(url) => ...）
 const apiClient = {
   get<T = unknown>(url: string, config?: { params?: Record<string, string | number> }) {
     return request<T>('GET', url, config);
