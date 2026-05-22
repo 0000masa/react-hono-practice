@@ -46,6 +46,18 @@ jobs:
         working-directory: ./terraform/${{ inputs.target_env }}
         
     steps:
+      - name: Show inputs in job summary
+        run: |
+          {
+            echo "## Inputs"
+            echo ""
+            echo "| Key | Value |"
+            echo "| --- | --- |"
+            echo "| action | ${{ inputs.action }} |"
+            echo "| target_env | ${{ inputs.target_env }} |"
+            echo "| enable_nat_gateway | ${{ inputs.enable_nat_gateway }} |"
+          } >> $GITHUB_STEP_SUMMARY
+
       - name: Checkout
         uses: actions/checkout@v4
       #  AWS 認証 (OIDC ロール)
