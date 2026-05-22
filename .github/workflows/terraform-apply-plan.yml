@@ -1,3 +1,5 @@
+run-name: terraform-apply-plan.yml | action=${{ inputs.action }} | target_env=${{ inputs.target_env }} | enable_nat_gateway=${{ inputs.enable_nat_gateway }}
+
 on:
   workflow_dispatch:
     inputs:

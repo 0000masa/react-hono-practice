@@ -2,6 +2,8 @@
 # operation で migrate / seed / sql を切り替える。
 # sql operation の権限境界は environment (required reviewers) で担保する。
 
+run-name: invoke-db-task.yml | target_env=${{ inputs.target_env }} | operation=${{ inputs.operation }} | seed_files=${{ inputs.seed_files }} | sql=${{ inputs.sql }}
+
 on:
   workflow_dispatch:
     inputs:

@@ -1,3 +1,5 @@
+run-name: terraform-stg-destroy.yml
+
 on:
   workflow_dispatch:
 

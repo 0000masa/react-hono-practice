@@ -1,3 +1,5 @@
+run-name: deploy-ecr-backend-lambda.yml
+
 on:
   workflow_dispatch:
 

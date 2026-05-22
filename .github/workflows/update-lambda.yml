@@ -2,6 +2,8 @@
 # ECR にプッシュ済みのイメージタグを指定して、5 つの Lambda 関数を一括更新する
 # deploy-backend-lambda.yml（ECR プッシュ）の後に実行する想定
 
+run-name: update-lambda.yml | target_env=${{ inputs.target_env }} | image_tag=${{ inputs.image_tag }}
+
 on:
   workflow_dispatch:
     inputs:
