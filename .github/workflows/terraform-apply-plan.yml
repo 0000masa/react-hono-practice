@@ -52,7 +52,7 @@ jobs:
       - name: Show inputs in job summary
         run: |
           {
-            echo "## Inputs"
+            echo "## 入力内容"
             echo ""
             echo "| Key | Value |"
             echo "| --- | --- |"
