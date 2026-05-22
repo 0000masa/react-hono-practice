@@ -18,10 +18,14 @@
 | バックエンド Unit | `backend/src/services/__tests__/` | 10 | すべてモック |
 | バックエンド Integration | `backend/src/__tests__/integration/` | 6 | DB は実物 (mysql-test) / AWS はモック / 認証はモック |
 | バックエンド E2E | `backend/src/__tests__/e2e/` | 1 | DB は実物 / AWS はモック / 認証はモック |
-| フロントエンド Unit / Component | `frontend/src/{lib,hooks,components}/__tests__/` | 14 | fetch / authClient / apiClient をモック |
+| フロントエンド Unit (関数 / フック) | `frontend/src/{lib,hooks}/__tests__/` | 10 | fetch / authClient をモック |
+| フロントエンド コンポーネント (= 結合相当) | `frontend/src/components/__tests__/` | 4 | apiClient をモック |
+| フロントエンド E2E | (未導入) | 0 | — (Playwright / Cypress 等は本プロジェクトでは採用していない) |
 | **合計** | | **31** | |
 
 戦略ドキュメント 2 章のピラミッド (Unit が広く、E2E は最小) を踏襲しています。
+
+> フロントエンドの 3 層は本プロジェクトでは「単体 (純粋関数 / フックロジック) / コンポーネント (バックの結合相当) / E2E (Playwright 等の実ブラウザ — 未導入)」と対応させています ([`react-hono-testing-faq.md` §3.2](./react-hono-testing-faq.md) 参照)。`useAuth.test.tsx` は `renderHook` + `AuthProvider` を使うため一見コンポーネントテストに見えますが、**フック単体のロジックを検証する** ものなので Unit に分類しています。
 
 ### 1.2 ディレクトリツリー (テスト関連のみ抜粋)
 
