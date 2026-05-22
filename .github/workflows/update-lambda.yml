@@ -38,6 +38,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      ## 入力内容をジョブサマリーに表示
+      - name: Show inputs in job summary
+        run: |
+          {
+            echo "## 入力内容"
+            echo ""
+            echo "| Key | Value |"
+            echo "| --- | --- |"
+            echo "| target_env | ${{ inputs.target_env }} |"
+            echo "| image_tag | ${{ inputs.image_tag }} |"
+          } >> $GITHUB_STEP_SUMMARY
+
       # prod は main ブランチでのみ実行可能
       # stg は main または develop ブランチで実行可能
       - name: Fail on forbidden branch

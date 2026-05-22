@@ -113,54 +113,11 @@ jobs:
       - name: Terraform Plan
         id: plan
         run: |
-          set -o pipefail
           terraform plan -no-color \
-            -var="enable_nat_gateway=${{ env.IS_ENABLE_NAT_GATEWAY }}" \
-            | tee plan.out
-
-      ## plan の集計行と全文を Job Summary に書き出す
-      - name: Write plan to summary
-        if: always() && steps.plan.outcome != 'skipped'
-        run: |
-          {
-            echo ""
-            echo "## Terraform Plan 結果"
-            echo ""
-            grep -E '^(Plan:|No changes\.)' plan.out | head -1 || echo "(集計行を検出できず)"
-            echo ""
-            echo "<details><summary>plan 出力の全文</summary>"
-            echo ""
-            echo '```'
-            cat plan.out
-            echo '```'
-            echo ""
-            echo "</details>"
-          } >> $GITHUB_STEP_SUMMARY
+            -var="enable_nat_gateway=${{ env.IS_ENABLE_NAT_GATEWAY }}"
 
       - name: Terraform Apply
-        id: apply
         if: inputs.action == 'apply'
         run: |
-          set -o pipefail
           terraform apply -auto-approve -input=false \
-            -var="enable_nat_gateway=${{ env.IS_ENABLE_NAT_GATEWAY }}" \
-            | tee apply.out
-
-      ## apply の集計行と全文を Job Summary に書き出す
-      - name: Write apply to summary
-        if: always() && inputs.action == 'apply' && steps.apply.outcome != 'skipped'
-        run: |
-          {
-            echo ""
-            echo "## Terraform Apply 結果"
-            echo ""
-            grep -E '^Apply complete!' apply.out || echo "(集計行を検出できず)"
-            echo ""
-            echo "<details><summary>apply 出力の全文</summary>"
-            echo ""
-            echo '```'
-            cat apply.out
-            echo '```'
-            echo ""
-            echo "</details>"
-          } >> $GITHUB_STEP_SUMMARY
+            -var="enable_nat_gateway=${{ env.IS_ENABLE_NAT_GATEWAY }}"

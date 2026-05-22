@@ -54,6 +54,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      ## 入力内容をジョブサマリーに表示
+      - name: Show inputs in job summary
+        run: |
+          {
+            echo "## 入力内容"
+            echo ""
+            echo "| Key | Value |"
+            echo "| --- | --- |"
+            echo "| target_env | ${{ inputs.target_env }} |"
+            echo "| operation | ${{ inputs.operation }} |"
+            echo "| seed_files | ${{ inputs.seed_files }} |"
+            echo "| sql | ${{ inputs.sql }} |"
+          } >> $GITHUB_STEP_SUMMARY
+
       # prod は main、stg は main または develop でのみ実行可能（update-lambda.yml と同じ）
       - name: Fail on forbidden branch
         if: |
