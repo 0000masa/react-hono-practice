@@ -204,6 +204,14 @@ describe('apiClient.post', () => {
     // body は文字列化されている。JSON.stringify は順序保持なのでこの比較で安全。
     expect(opts.body).toBe(JSON.stringify({ name: 'Alice' }));
 
+    // Record<string, string> とは:
+    //   TypeScript 組み込みのユーティリティ型で「キーが string・値が string のオブジェクト」を表す。
+    //   Record<K, V> は { [key: K]: V } (= index signature) と同義の糖衣構文。
+    //   例:
+    //     Record<string, string>      → { 'Content-Type': 'application/json', 'Accept': '*/*' } など
+    //     Record<string, number>      → { count: 5, total: 100 } など
+    //     Record<'a' | 'b', boolean>  → { a: true, b: false } (キーを literal の union に限定する使い方も可)
+    //
     // headers as Record<string, string> のキャストは、
     // 本来 headers の型が HeadersInit (Record | Headers | [string,string][]) という union のため、
     // ピンポイントで `[key]` でアクセスできる形に絞り込んで型エラーを避けている。
