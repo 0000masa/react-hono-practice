@@ -31,8 +31,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // @testing-library/react:
 //   renderHook — React フックを「ダミーコンポーネント経由」で実行できるヘルパ。
 //                wrapper オプションで <Provider> 配下にマウントできる。
-//                フックは「コンポーネント内でしか呼べない」という React の制約を
-//                テスト用に回避する仕組み。
+//
+//                ※ なぜ「ダミーコンポーネント経由」が必要か:
+//                  useAuth 自体は構文的にはただの関数だが、中で useContext を呼ぶ。
+//                  useContext / useState / useEffect などの React Hook は、
+//                  React のレンダラーが「今どのコンポーネントをレンダリング中か」
+//                  というグローバル状態を覗き込んで動く仕様で、コンポーネントの
+//                  レンダリング外で呼ぶと "Invalid hook call" がランタイムで投げられる
+//                  (= TypeScript 型では止まらない、実行時の制約)。これは Hook の
+//                  状態が「コンポーネントごと + 呼び出し順序」で管理されているため。
+//                  renderHook は「Hook を React の外で呼ぶ抜け道」ではなく、
+//                  内部で小さなテスト用コンポーネントを作って「その render 中に
+//                  フックを呼ばせる」── 正しい呼び出し環境を整えるヘルパ。
+//
 //   waitFor    — 「条件が満たされるまで関数を再評価し続ける」非同期待機ヘルパ。
 //                AuthProvider の useEffect (= 非同期で setState する) が完了するのを
 //                待つために使う。デフォルトで 1 秒、50ms 間隔で polling する。
