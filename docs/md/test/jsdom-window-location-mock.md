@@ -190,3 +190,75 @@ api.test.ts の `beforeEach` でもう一つ呼ばれている `vi.stubGlobal('f
 `vi.stubGlobal` も内部的には `defineProperty` を使いますが、相手側プロパティが `configurable: false` だと差し替えに失敗します。`window.location` だけ別ルートで `Object.defineProperty` を直接叩いているのはそのためです。
 
 `vi.stubGlobal` の API 詳細は [`vitest-reference.md`](./vitest-reference.md) (vi.stubGlobal の節) を参照してください。
+
+---
+
+## 9. FAQ: そのまま `window.location.href = '/login'` をテスト内で代入すればいいのでは?
+
+「`Object.defineProperty` を使わなくても、テスト内で `window.location.href = '/login'` と書けば同じ挙動になるのでは?」というのは、最初に必ず出てくる疑問です。結論から言うと **動きません**。具体的にどこで詰むかを api.test.ts のテスト 4 ([§5](#5-objectdefinepropertywindow-location---が何をしているか) で解説したケース) を例に追っていきます。
+
+テストの流れはこうなっています:
+
+```ts
+// (A) 「いま /dashboard にいる」という前提状態をセット
+(window.location as ...).pathname = '/dashboard';
+
+// (B) api.ts を呼ぶと、内部で window.location.href = '/login' が走る
+await expect(apiClient.get('/users')).rejects.toThrow(/status 401/);
+
+// (C) 「/login へのリダイレクトが指示された」ことを観測
+expect(window.location.href).toBe('/login');
+```
+
+ここで重要なのは: **テスト側は実際に画面遷移したいわけではない**、ということです。やりたいのは「`api.ts` が `href = '/login'` という代入を **試みたか?**」の観測だけ。
+
+### 9.1 (A) で詰む — `pathname = '/dashboard'` の時点で例外
+
+本物の `window.location.pathname` は setter で、書いた瞬間に「`/dashboard` へ遷移しろ」というナビゲーションを起こします。jsdom はこの遷移処理を実装していないため、
+
+```js
+window.location.pathname = '/dashboard';
+// → jsdom: Error: Not implemented: navigation (except hash changes)
+```
+
+がよく投げられます (jsdom の README にも明記されている既知の制約)。バージョンによってはサイレントに無視されることもあり、挙動が安定しません。
+**「テスト前提として今のページを `/dashboard` にする」というセットアップそのものができない** わけです。
+
+### 9.2 (B) で詰む — `api.ts` 内の `href = '/login'` も同じ setter
+
+仮に (A) を諦めても、(B) で `api.ts` が走らせる `window.location.href = '/login'` も同じ setter 経由なので、
+
+```
+Error: Not implemented: navigation (except hash changes)
+```
+
+がここで投げられます。本来テストしたいのは 401 ハンドリングなのに、**jsdom のナビゲーション例外が先に出てしまい、api.ts 側のエラーがすり替わる** という事故になります。
+
+### 9.3 (C) でも壊れる — 値が「保存」されない
+
+仮に jsdom が例外を投げない実装だったとしても、本物の Location は `href` への代入を「**値の保存**」ではなく「**遷移指示**」として解釈します。遷移が起きると `window.location` 全体が新しい URL の状態に再初期化されてしまうため、後から `expect(window.location.href).toBe('/login')` で読んだ値がこちらの期待通りに残っている保証はありません (オリジン補完、末尾スラッシュの正規化など URL パーサ経由の変形も入る)。
+
+### 9.4 POJO に差し替えると全部解決する
+
+[§5](#5-objectdefinepropertywindow-location---が何をしているか) のとおり `Object.defineProperty` で **ただの平易なオブジェクト (POJO) に置き換える** と、
+
+- `(window.location as ...).pathname = '/dashboard'` → ただのプロパティ代入。例外も遷移も起きない、値が入るだけ
+- `api.ts` 側の `window.location.href = '/login'` → これもただのプロパティ代入。値が入るだけ
+- `expect(window.location.href).toBe('/login')` → 上で入った値をそのまま読むだけ
+
+setter のロジックが丸ごと取り除かれているので、`api.ts` 側は「ブラウザに対して遷移を指示した気でいる」だけで、実際は POJO のフィールドに文字列が代入されている、という構造になります。これで「ブラウザ動作に踏み込まず、API クライアントの**意図**だけを観測する」という単体テストが成立します。
+
+### 9.5 比較表
+
+| やりたいこと | 本物 `window.location` (jsdom そのまま) | POJO に差し替え (`Object.defineProperty`) |
+|---|---|---|
+| `pathname = '/dashboard'` で前提状態を作る | `Not implemented: navigation` 例外 or 不安定 | ただの代入 OK |
+| `api.ts` が `href = '/login'` を試みる | 同じく navigation 例外で本来のエラーがかき消える | ただの代入 OK |
+| `href` を後から `expect` で読む | 遷移処理を経た正規化後の値 (不安定) | 入れた値がそのまま読める |
+
+### 9.6 ひとことで
+
+- jsdom には本物の遷移処理が無い → setter は例外 or 無視
+- 本物のブラウザでは setter は副作用が広すぎる → テスト観測点を壊す
+
+の二重苦になるため、「**遷移のフリすら起こさせず、ただの代入で値を残すだけのオブジェクト**」に置き換える `Object.defineProperty` パターンが結局いちばん素直、というのが結論です。
