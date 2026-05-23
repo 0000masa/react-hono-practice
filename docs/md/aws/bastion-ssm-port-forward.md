@@ -198,7 +198,7 @@ export AWS_REGION=ap-northeast-1
    }
    ```
 
-> **なぜ Parameter Store ではなく Secrets Manager なのか**: このプロジェクトは RDS Proxy 用の認証情報を Secrets Manager に置いており、さらに 30 日ごとの自動パスワードローテーションを有効にしている（`secrets_manager.tf` / `docs/secrets-manager-guide.md`）。ローテーション Lambda は **Secrets Manager と RDS の実パスワードだけを更新し、SSM Parameter Store は初期値のまま取り残される**。そのため Parameter Store の値を使っても `Access denied for user` になる。RDS Proxy 経由の Lambda が参照するのと同じ Secrets Manager を参照するのが唯一正しい取得先。
+> **なぜ Parameter Store ではなく Secrets Manager なのか**: このプロジェクトは RDS Proxy 用の認証情報を Secrets Manager に置いており、さらに 30 日ごとの自動パスワードローテーションを有効にしている（`secrets_manager.tf` / `./secrets-manager-guide.md`）。ローテーション Lambda は **Secrets Manager と RDS の実パスワードだけを更新し、SSM Parameter Store は初期値のまま取り残される**。そのため Parameter Store の値を使っても `Access denied for user` になる。RDS Proxy 経由の Lambda が参照するのと同じ Secrets Manager を参照するのが唯一正しい取得先。
 
 > **注意**: パスワードをシェル履歴に残さないこと。後述のコマンドではプロンプトに貼り付けるだけなので履歴には残らない。
 
@@ -486,5 +486,5 @@ An error occurred (TargetNotConnected) when calling the StartSession operation
 
 ## 関連ドキュメント
 
-- `docs/rds-proxy-iam-auth-guide.md` — RDS Proxy の IAM 認証の詳細
-- `docs/secrets-manager-guide.md` — パスワードローテーションの仕組み
+- `./rds-proxy-iam-auth-guide.md` — RDS Proxy の IAM 認証の詳細
+- `./secrets-manager-guide.md` — パスワードローテーションの仕組み
