@@ -27,7 +27,10 @@
 | `npm test` | `frontend/` | Unit + Component | 無し | 2〜3 秒 |
 | `npm run test:watch` | `frontend/` | Unit + Component (watch) | 無し | — |
 
-#### 補足: `vitest run` と `vitest` (引数なし) の違い
+> 以下は §1.1 の本筋ではない補足 3 件です。詳細を知りたいときだけ展開してください。
+
+<details>
+<summary><strong>補足: <code>vitest run</code> と <code>vitest</code> (引数なし) の違い</strong> (クリックで展開)</summary>
 
 上の表で `npm test` は `vitest run` を、`npm run test:watch` は `vitest` を実行しています (`backend/package.json` / `frontend/package.json` 参照)。両者の差は **「1 回走って終わるか / ファイル監視で常駐するか」** の 1 点だけです。
 
@@ -42,7 +45,112 @@
 
 `package.json` の `scripts` がこの慣習に従い、`test` (1 回実行) と `test:watch` (監視モード) の 2 種類を分けて用意しているのもこのためです。
 
-#### 補足: バックエンドの `vitest run` と `vitest run --config vitest.integration.config.ts` の違い
+</details>
+
+<details>
+<summary><strong>補足: なぜ <code>vitest run</code> を直接叩くと "command not found" になるのか?</strong> (クリックで展開)</summary>
+
+#### 現象
+
+シェルから直接 `vitest run` を叩くと失敗するのに、`npm test` 経由なら同じ `vitest run` が動く:
+
+```bash
+$ cd backend
+$ vitest run
+Command 'vitest' not found, did you mean:
+  command 'vttest' from deb vttest (...)
+
+$ npm test
+> test
+> vitest run
+
+ RUN  v2.1.9 ...
+ ✓ src/services/__tests__/mail.service.test.ts (3)
+ ...
+```
+
+理由は **「`vitest` がプロジェクトローカルにしかインストールされていない」 + 「npm スクリプト経由なら自動で PATH が補正される」** の 2 段構え。
+
+#### 前提: シェルが「コマンド」を実行する仕組み
+
+- `bash` / `zsh` などのシェルは、コマンド名 (`ls` / `git` / `vitest`) を受け取ると **環境変数 `PATH` に並べられたディレクトリを左から順に探し、最初に見つかった実行ファイルを走らせる**
+- 「コマンド」の正体は **実行ビットが立った普通のファイル**。シェルにとって特別なものではない
+- `echo $PATH` で確認できる (例: `/usr/local/bin:/usr/bin:/bin`)
+
+```bash
+$ which ls
+/usr/bin/ls
+```
+
+`ls` というコマンドは `/usr/bin/ls` という実行ファイル。`/usr/bin` が `PATH` に入っているから見つかる。
+
+#### `node_modules/.bin/` とは何か
+
+npm パッケージの中には「コマンドラインから使う」ためのエントリポイントを持つものがある (vitest / tsc / eslint / esbuild 等)。これらは各パッケージの `package.json` の `bin` フィールドで宣言されている:
+
+```json
+// node_modules/vitest/package.json (抜粋)
+{
+  "name": "vitest",
+  "version": "2.1.9",
+  "bin": {
+    "vitest": "./vitest.mjs"
+  }
+}
+```
+
+`npm install` (本プロジェクトでは `npm ci`) の実行時、npm は依存パッケージ全部の `bin` フィールドを集めて **シンボリックリンクとして `node_modules/.bin/` に展開**する:
+
+```bash
+$ ls -la backend/node_modules/.bin/vitest
+lrwxrwxrwx ... vitest -> ../vitest/vitest.mjs
+```
+
+つまり `node_modules/.bin/` は **「このプロジェクトに入っている npm パッケージが提供するコマンドの集積所」**。シェルから見ればただのディレクトリで特別扱いはされず、`PATH` に入っていないと見つけられない。
+
+> 「コマンドは `.bin` で定義されるもの」 ── 厳密には半分正解で、コマンドの実体は **各パッケージ本体のファイル** (例: `node_modules/vitest/vitest.mjs`)。`.bin/` はそこへのシンボリックリンクを集めた **スナップショット**にすぎない。シェル一般としては「PATH 上のディレクトリにある実行ファイル = コマンド」が原則で、`.bin/` は npm 限定の慣習。
+
+#### npm スクリプトが PATH を一時的に書き換える
+
+`npm test` / `npm run xxx` の実体は **「`scripts` フィールドに書かれた文字列を子プロセスとして実行する」** 仕組みだが、実行する前に npm は環境変数 `PATH` を以下の形に書き換える:
+
+```
+PATH = <現在ディレクトリの node_modules/.bin>:<親ディレクトリの node_modules/.bin>:...:(元の PATH)
+```
+
+その結果、子プロセスのシェルでは `vitest` が `backend/node_modules/.bin/vitest` として解決でき、`scripts` の `"test": "vitest run"` が動く。**`npm test` から抜けた瞬間に元の PATH に戻る** (= シェルからは依然として `vitest` が見えない) のはこの仕組みのため。
+
+確認:
+
+```bash
+$ which vitest
+vitest not found        # 普段の PATH には無い
+
+$ cd backend && npm exec -- which vitest
+/home/.../react-hono-practice/backend/node_modules/.bin/vitest    # npm 経由なら見える
+```
+
+#### 直接叩きたいときの選択肢
+
+| 方法 | コマンド | 備考 |
+|------|--------|------|
+| **npx 経由 (推奨)** | `npx vitest run` | `npx` も `node_modules/.bin` を見るので解決できる。**プロジェクトの devDeps と同じバージョン**が走るのが利点 |
+| フルパス指定 | `./node_modules/.bin/vitest run` | 確実だが冗長。スクリプトに書くなら可 |
+| npm スクリプト経由 | `npm test` / `npm run test:integration` | 最も無難。Vitest に引数を渡したいときは `npm test -- --reporter=verbose` のように `--` で区切る |
+| グローバルインストール | `npm install -g vitest` | **非推奨**。プロジェクトの `vitest@2.1.9` とグローバル版のバージョンがずれると謎の挙動を踏みやすく、`package-lock.json` の意味も薄れる |
+
+#### まとめ
+
+- シェルコマンドは **PATH のディレクトリの中にある実行ファイル**を探して走らせる
+- `vitest` のような npm パッケージのコマンドは **各パッケージ本体の実行ファイル**で、`node_modules/.bin/` に **シンボリックリンク**として置かれる
+- `node_modules/.bin/` はデフォルトでは PATH に **入っていない**
+- `npm test` / `npm run xxx` を経由すると、npm が一時的に PATH を書き換えて `node_modules/.bin/` を見えるようにする
+- だから **普段は `npm test`、シェルから単体で叩きたいときは `npx vitest`** が正解
+
+</details>
+
+<details>
+<summary><strong>補足: バックエンドの <code>vitest run</code> と <code>vitest run --config vitest.integration.config.ts</code> の違い</strong> (クリックで展開)</summary>
 
 `backend/package.json` の `scripts` には **`vitest run` を 2 種類** 並べています:
 
@@ -73,6 +181,8 @@
 両方を 1 つの `vitest.config.ts` に詰め込もうとすると、上記の差分を `if (process.env.MODE === 'integration')` のような分岐で書くことになり、可読性が落ちる ── ので **設定ファイル自体を 2 個に分ける** のが Vitest 公式の推奨パターン。フロントエンドは差分が少ないので 1 ファイルで済んでいます。
 
 設定ファイルの完全な差分は [`vitest-config-front-vs-back.md`](./vitest-config-front-vs-back.md) を参照。
+
+</details>
 
 実装の詳細 (各テストファイルの中身や `vi.mock` の書き方) は [`testing-implementation-guide.md`](./testing-implementation-guide.md) を参照してください。本ドキュメントは「動かし方と CI 化」のみ扱います。
 
