@@ -136,6 +136,34 @@ describe('useAuth', () => {
     expect(result.current.user).toBeNull();
     // logout は AuthContextType のインターフェースとして必ず関数で提供される
     // (型レベルだけでなくランタイムで持っていることを確認)。
+    //
+    // typeof X とは:
+    //   JavaScript 組み込みの演算子。値 X の「型」を文字列で返す。
+    //     typeof 42        → 'number'
+    //     typeof 'abc'     → 'string'
+    //     typeof true      → 'boolean'
+    //     typeof undefined → 'undefined'
+    //     typeof (() => {}) → 'function'
+    //     typeof null      → 'object'   (歴史的に有名な仕様バグ)
+    //     typeof {}        → 'object'
+    //   関数かどうかを真偽値ではなく文字列で判定するための定番イディオム。
+    //
+    // 何をテストしているか:
+    //   useAuth() が返したオブジェクトの `logout` プロパティが、
+    //   「実行時に関数として存在している」ことを確認する。
+    //   - logout が undefined → AuthProvider が value に渡し忘れている
+    //   - logout が別の型 (string など) → どこかで形が崩れている
+    //   いずれも 'function' との比較で fail する。
+    //
+    //   TypeScript の型 (AuthContextType の `logout: () => Promise<void>`) は
+    //   コンパイル時には関数であることを保証するが、本ファイルでは vi.mock や
+    //   `as never` で型を一部緩めているため、実行時の形が崩れていても
+    //   コンパイラは気付けない場面がある。それを最後に拾う安全網がこの一行。
+    //
+    //   なお「呼べる形か」だけを見ていて、関数の中身が正しく authClient.signOut
+    //   を呼ぶか等の挙動までは検証していない。
+    //   挙動を検証したい場合は別途 act(() => result.current.logout()) を呼んで
+    //   authClient.signOut の mock 呼び出し履歴を assert する形になる。
     expect(typeof result.current.logout).toBe('function');
   });
 
